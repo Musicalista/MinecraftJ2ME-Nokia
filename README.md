@@ -1,2 +1,2 @@
-# MinecraftJ2ME_0.6.1
+# MinecraftJ2ME
 Jarona
