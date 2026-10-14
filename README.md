@@ -1,2 +1,0 @@
-# MinecraftJ2ME
-Jarona

@@ -1,0 +1,7 @@
+/** Цвета шерсти по data (для окраски шкуры овцы). */
+public final class Wool {
+    public static final int[] COLOR = {
+            0xF0F0F0, 0xEB8844, 0xC354CD, 0x6689D3, 0xDECF2A, 0x41CD34, 0xD88198, 0x434343,
+            0xABABAB, 0x287697, 0x7B2FBE, 0x253192, 0x51301A, 0x3B511A, 0xB3312C, 0x1E1B1B
+    };
+}
