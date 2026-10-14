@@ -32,8 +32,8 @@ public final class Particles {
         level = l;
         count = 0;
         if (app[0] == null) {
-            app[T_MISC] = app(new Texture2D(new Image2D(Image2D.RGBA, R.img("/particles.png"))));
-            app[T_ITEM] = app(new Texture2D(new Image2D(Image2D.RGBA, R.img("/gui/items.png"))));
+            app[T_MISC] = app(new Texture2D(R.image2D("/particles.png")));
+            app[T_ITEM] = app(new Texture2D(R.image2D("/gui/items.png")));
         }
         if (app[T_TERRAIN] == null || app[T_TERRAIN].getTexture(0) != lr.terrainTex) app[T_TERRAIN] = app(lr.terrainTex);
         for (int i = 0; i < 3; i++) if (app[i].getFog() != lr.fog) app[i].setFog(lr.fog);

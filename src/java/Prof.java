@@ -85,6 +85,8 @@ final class Prof {
         Runtime r = Runtime.getRuntime();
         sb.append(" |mem ").append((r.totalMemory() - r.freeMemory()) >> 10).append('/').append(r.totalMemory() >> 10)
                 .append("K gc ").append(gcs).append(" paths ").append(paths);
+        r.gc();
+        sb.append(" gcmem ").append((r.totalMemory() - r.freeMemory()) >> 10).append('K');
         if (mc.level != null) sb.append(" ent ").append(mc.level.entities.size()).append(" secs ").append(mc.lr != null ? mc.lr.lastDrawn : 0)
                 .append(" pos ").append((int) mc.player.x).append(',').append((int) mc.player.y).append(',').append((int) mc.player.z);
         Log.i(sb.toString());

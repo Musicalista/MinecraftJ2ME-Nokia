@@ -30,7 +30,8 @@ public final class SecBuf {
 
     static int tintIndex(int t) {
         for (int i = 0; i < nTints; i++) if (tints[i] == t) return i;
-        if (nTints == 256) return 0;
+        // в Part.info на оттенок 6 бит
+        if (nTints == 64) return 0;
         if (nTints == tints.length) {
             int[] n = new int[nTints * 2];
             System.arraycopy(tints, 0, n, 0, nTints);

@@ -13,6 +13,10 @@ import javax.microedition.m3g.*;
  *   ёмкости (лишние вершины — вырожденные квады), материалы и узлы общие для всех миров.
  * Память (2026-10-14, жалобы с E75/Asha: хип 4..16 МБ): секции и меши держатся только для столбцов в пределах
  * дальности прорисовки, квады секций — в сжатом виде без цвета (SecBuf), цвет считается при склейке.
+ * С 2026-10-14 (MemoryView: кэш секций 2.3 МБ, вершины M3G 4.4 МБ) квады секций держатся только у столбцов рядом
+ * с игроком (там правки); у дальних после склейки забываются, и правка там перестраивает весь столбец. Смена
+ * времени суток перекрашивает готовые части по коду света квада (Part.info, 2 байта на квад) без склейки.
+ * Вершины частей: цвет твёрдого меша — RGB (альфа всегда 255), развёртка — байтами со сдвигом, если хватает.
  * Твёрдый меш = слои OPAQUE и ALPHATEST оригинала (оба с отсечением граней, второй с альфа-тестом — рисуются одним
  * проходом с альфа-тестом); полупрозрачный (вода, лёд) — после сущностей и частиц, от дальних к ближним.
  */
@@ -40,6 +44,15 @@ public final class LevelRenderer {
     private final boolean[][] shown = new boolean[NM][NG];
     private final int[] blendSlot = new int[NG];
     final boolean[] grpDirty = new boolean[NG];
+    /** столбцы, которые надо перекрасить (сменилась темнота неба) */
+    private final boolean[] grpRecolor = new boolean[NG];
+    /** квады секции забыты (столбец далеко от игрока): перед склейкой секцию надо построить заново */
+    final boolean[] lost = new boolean[NS];
+    /** секция строится только ради кэша квадов (геометрия не менялась) — столбец не склеивать */
+    private final boolean[] quiet = new boolean[NS];
+    /** столбец игрока: кэш квадов держится в радиусе NEAR столбцов от него */
+    private int nearX = -99, nearZ = -99;
+    static final int NEAR = 1;
     final int[] grpY0 = new int[NG], grpY1 = new int[NG];
     /** столбцы в пределах дальности: только для них строятся секции и меши */
     final boolean[] inRange = new boolean[NG];
@@ -83,8 +96,12 @@ public final class LevelRenderer {
         Mesh mesh;
         VertexBuffer vb;
         VertexArray pa, ca, ta;
-        int cls, verts, dir;
+        int cls, verts, dir, key, comps;
         boolean bytes, on;
+        /** биас развёртки байтами */
+        float[] uvBias;
+        /** квады: код света | затенение << 8 | оттенок << 10 — для перекраски без склейки */
+        short[] info;
         /** крайняя плоскость граней направления dir (в блоках мира) */
         float plane;
     }
@@ -183,7 +200,7 @@ public final class LevelRenderer {
         caps[n++] = PART_MAX;
         CAPS = new int[n];
         System.arraycopy(caps, 0, CAPS, 0, n);
-        pool = new java.util.Vector[n * 2];
+        pool = new java.util.Vector[n * 8];
         for (int i = 0; i < pool.length; i++) pool[i] = new java.util.Vector();
     }
 
@@ -208,7 +225,7 @@ public final class LevelRenderer {
             // на телефонах лишние части — сборщику мусора (в J2ME Loader финализация M3G роняет процесс)
             if (!keepPool && pooledVerts + CAPS[p.cls] > POOL_LIMIT) continue;
             pooledVerts += CAPS[p.cls];
-            pool[p.cls * 2 + (p.bytes ? 1 : 0)].addElement(p);
+            pool[p.key].addElement(p);
         }
     }
 
@@ -216,6 +233,7 @@ public final class LevelRenderer {
         dirtyCount = 0;
         for (int i = 0; i < NS; i++) {
             dirty[i] = inRange[i & 255];
+            quiet[i] = false;
             if (dirty[i]) dirtyCount++;
         }
     }
@@ -252,6 +270,7 @@ public final class LevelRenderer {
         }
         blendSlot[g] = -1;
         grpDirty[g] = false;
+        grpRecolor[g] = false;
         grpUrgent[g] = false;
         for (int sy = 0; sy < SY; sy++) {
             int i = g | (sy << 8);
@@ -260,6 +279,8 @@ public final class LevelRenderer {
                 dirtyCount--;
             }
             built[i] = false;
+            lost[i] = false;
+            quiet[i] = false;
             sChest[i] = null;
             for (int k = 0; k < NM; k++) {
                 sVerts[k][i] = 0;
@@ -271,17 +292,30 @@ public final class LevelRenderer {
     }
 
     /**
-     * Сменилась темнота неба: оригинал перестраивает все освещённые небом чанки (skyColorChanged), здесь столбцы
-     * только склеиваются заново — цвет считается при склейке, геометрия от времени суток не зависит.
+     * Сменилась темнота неба: оригинал перестраивает все освещённые небом чанки (skyColorChanged), здесь части
+     * мешей только перекрашиваются по сохранённым кодам света — геометрия от времени суток не зависит.
      */
     public void skyChanged() {
-        for (int g = 0; g < NG; g++) if (gpart[0][g] != null || gpart[1][g] != null) grpDirty[g] = true;
+        for (int g = 0; g < NG; g++) if (gpart[0][g] != null || gpart[1][g] != null) grpRecolor[g] = true;
     }
 
     private void markDirty(int sx, int sy, int sz) {
         if (sx < 0 || sy < 0 || sz < 0 || sx >= SX || sy >= SY || sz >= SZ) return;
         int i = sx + (sz << 4) + (sy << 8);
         if (!inRange[i & 255]) return;
+        quiet[i] = false;
+        setDirty(i);
+        // квады остальных секций столбца забыты — без них столбец не склеить
+        for (int y = 0, g = i & 255; y < SY; y++) {
+            int j = g | (y << 8);
+            if (lost[j]) {
+                quiet[j] = false;
+                setDirty(j);
+            }
+        }
+    }
+
+    private void setDirty(int i) {
         if (!dirty[i]) {
             dirty[i] = true;
             dirtyCount++;
@@ -307,7 +341,10 @@ public final class LevelRenderer {
         if (sx < 0 || sy < 0 || sz < 0 || sx >= SX || sy >= SY || sz >= SZ) return;
         int i = sx + (sz << 4) + (sy << 8);
         if (!inRange[i & 255]) return;
+        boolean wasLost = lost[i];
         markDirty(sx, sy, sz);
+        // столбец без кэша квадов (далеко от игрока) — в общую очередь, а не весь столбец за один кадр
+        if (wasLost) return;
         for (int k = 0; k < urgentCount; k++) if (urgent[k] == i) return;
         if (urgentCount < urgent.length) urgent[urgentCount++] = i;
     }
@@ -316,6 +353,7 @@ public final class LevelRenderer {
     public void updateDirty(float cx, float cy, float cz, int budgetMs) {
         long start = System.currentTimeMillis();
         updateRange(cx, cz);
+        updateNear(Mth.floor(cx) >> 4, Mth.floor(cz) >> 4);
         while (urgentCount > 0) {
             int i = urgent[--urgentCount];
             if (dirty[i]) {
@@ -348,9 +386,12 @@ public final class LevelRenderer {
     }
 
     private void rebuild(int i) {
-        dirty[i] = false;
-        dirtyCount--;
+        if (dirty[i]) {
+            dirty[i] = false;
+            dirtyCount--;
+        }
         built[i] = true;
+        lost[i] = false;
         int sx = i & 15, sz = (i >> 4) & 15, sy = i >> 8;
         for (int k = 0; k < NM; k++) mb[k].clear();
         long t0 = Prof.t();
@@ -378,14 +419,69 @@ public final class LevelRenderer {
                 sP[k][i] = p; sLv[k][i] = lv; sQ[k][i] = q;
             }
         }
-        grpDirty[group(sx, sz)] = true;
+        if (quiet[i]) quiet[i] = false;
+        else grpDirty[group(sx, sz)] = true;
+    }
+
+    private boolean isNear(int g) {
+        return Math.abs((g & 15) - nearX) <= NEAR && Math.abs((g >> 4) - nearZ) <= NEAR;
+    }
+
+    /**
+     * Игрок сменил столбец: у ушедших далеко забыть квады секций, у подошедших — тихо построить заново (в общей
+     * очереди), чтобы правки рядом с игроком перестраивали одну секцию, а не столбец.
+     */
+    private void updateNear(int px, int pz) {
+        if (px == nearX && pz == nearZ) return;
+        nearX = px;
+        nearZ = pz;
+        for (int g = 0; g < NG; g++) {
+            if (!inRange[g]) continue;
+            if (isNear(g)) {
+                for (int sy = 0; sy < SY; sy++) {
+                    int i = g | (sy << 8);
+                    if (lost[i] && !dirty[i]) {
+                        quiet[i] = true;
+                        setDirty(i);
+                    }
+                }
+            } else if (!grpDirty[g]) forget(g);
+        }
+    }
+
+    /** Забыть квады секций столбца (меши остаются). */
+    private void forget(int g) {
+        // столбец ждёт перестройки — квады понадобятся при склейке, после неё он забудется сам
+        for (int sy = 0; sy < SY; sy++) {
+            int i = g | (sy << 8);
+            if (dirty[i] && !quiet[i]) return;
+        }
+        for (int sy = 0; sy < SY; sy++) {
+            int i = g | (sy << 8);
+            if (dirty[i]) {
+                dirty[i] = false;
+                dirtyCount--;
+                quiet[i] = false;
+            }
+            if (!built[i]) continue;
+            boolean any = false;
+            for (int k = 0; k < NM; k++) {
+                if (sVerts[k][i] != 0) any = true;
+                sP[k][i] = null;
+                sLv[k][i] = null;
+                sQ[k][i] = null;
+            }
+            lost[i] = any;
+        }
     }
 
     // буферы склейки одной части: позиции в 1/16 от угла группы, цвета, развёртка
     private static short[] cPos;
     private static byte[] cCol;
     private static short[] cUv;
-    private static byte[] bPos;
+    private static byte[] bPos, bUv;
+    /** квады части: код света | затенение << 8 | оттенок << 10 */
+    private static short[] cInfo;
     private int cVerts;
     private final int[] lightRgb = new int[256 * 4];
 
@@ -395,16 +491,22 @@ public final class LevelRenderer {
      * по осям задаёт преобразование узла Mesh), иначе short с шагом 1/16. Вид от этого не меняется.
      */
     private void combine(int g) {
+        // квады, забытые у дальнего столбца, нужны сейчас (срочная правка) — построить
+        for (int sy = 0; sy < SY; sy++) {
+            int i = g | (sy << 8);
+            if (lost[i] || (dirty[i] && sP[0][i] == null && sP[1][i] == null && (sVerts[0][i] | sVerts[1][i]) != 0)) rebuild(i);
+        }
         grpDirty[g] = false;
+        grpRecolor[g] = false;
         if (cPos == null) {
             cPos = new short[PART_MAX * 3];
             cCol = new byte[PART_MAX * 4];
             cUv = new short[PART_MAX * 2];
             bPos = new byte[PART_MAX * 3];
+            bUv = new byte[PART_MAX * 2];
+            cInfo = new short[PART_MAX / 4];
         }
-        // яркость по коду света при текущем skyDarken и затенению — один раз на склейку
-        for (int code = 0; code < 256; code++)
-            for (int s = 0; s < 4; s++) lightRgb[(code << 2) | s] = BR[level.levelOf(code)] * SecBuf.SHADES[s] / 255;
+        lightTable();
         int gx = (g % GW) << GS, gz = (g / GW) << GS;
         int y0 = 99, y1 = -1;
         for (int k = 0; k < NM; k++) {
@@ -420,10 +522,11 @@ public final class LevelRenderer {
             }
             for (int b = 0; b < 7; b++) {
                 cVerts = 0;
+                int nc = k == 0 ? 3 : 4;
                 for (int sy = 0; sy < SY; sy++) {
                     int i = g | (sy << 8);
                     int v = sVerts[k][i];
-                    if (v == 0) continue;
+                    if (v == 0 || sP[k][i] == null) continue;
                     int[] p = sP[k][i], q = sQ[k][i];
                     byte[] lv = sLv[k][i];
                     int dy = sy * 256;
@@ -435,15 +538,17 @@ public final class LevelRenderer {
                         int tile = (info >>> 13) & 255, tu = (tile & 15) << 4, tv = tile & 0xF0;
                         byte cr = (byte) (((tint >> 16) & 255) * lt / 255), cg = (byte) (((tint >> 8) & 255) * lt / 255);
                         byte cb = (byte) ((tint & 255) * lt / 255), ca = (byte) (tint >>> 24);
+                        cInfo[cVerts >> 2] = (short) ((info & 1023) | (((info >>> 21) & 63) << 10));
                         for (int j = qi << 2, e = j + 4; j < e; j++) {
                             int pp = p[j], d = cVerts;
                             cPos[d * 3] = (short) SecBuf.px(pp);
                             cPos[d * 3 + 1] = (short) (SecBuf.py(pp) + dy);
                             cPos[d * 3 + 2] = (short) SecBuf.pz(pp);
-                            cCol[d * 4] = cr;
-                            cCol[d * 4 + 1] = cg;
-                            cCol[d * 4 + 2] = cb;
-                            cCol[d * 4 + 3] = ca;
+                            int o = d * nc;
+                            cCol[o] = cr;
+                            cCol[o + 1] = cg;
+                            cCol[o + 2] = cb;
+                            if (nc == 4) cCol[o + 3] = ca;
                             cUv[d * 2] = (short) (tu + (pp >>> 27));
                             cUv[d * 2 + 1] = (short) (tv + lv[j]);
                             cVerts = d + 1;
@@ -463,6 +568,41 @@ public final class LevelRenderer {
         }
         grpY0[g] = y0 < 99 ? y0 * 16 : 0;
         grpY1[g] = y1 >= 0 ? y1 * 16 + 16 : 0;
+        if (!isNear(g)) forget(g);
+    }
+
+    /** яркость по коду света при текущем skyDarken и затенению */
+    private void lightTable() {
+        for (int code = 0; code < 256; code++)
+            for (int s = 0; s < 4; s++) lightRgb[(code << 2) | s] = BR[level.levelOf(code)] * SecBuf.SHADES[s] / 255;
+    }
+
+    /** Перекрасить части столбца по кодам света квадов (Part.info) — смена времени суток без склейки. */
+    private void recolor(int g) {
+        grpRecolor[g] = false;
+        if (cCol == null) return;
+        for (int k = 0; k < NM; k++) {
+            Part[] ps = gpart[k][g];
+            if (ps == null) continue;
+            for (int pi = 0; pi < ps.length; pi++) {
+                Part p = ps[pi];
+                int nc = p.comps, nq = p.verts >> 2;
+                short[] inf = p.info;
+                for (int q = 0, o = 0; q < nq; q++) {
+                    int info = inf[q];
+                    int lt = lightRgb[((info & 255) << 2) | ((info >> 8) & 3)], tint = SecBuf.tints[(info >> 10) & 63];
+                    byte cr = (byte) (((tint >> 16) & 255) * lt / 255), cg = (byte) (((tint >> 8) & 255) * lt / 255);
+                    byte cb = (byte) ((tint & 255) * lt / 255), ca = (byte) (tint >>> 24);
+                    for (int j = 0; j < 4; j++, o += nc) {
+                        cCol[o] = cr;
+                        cCol[o + 1] = cg;
+                        cCol[o + 2] = cb;
+                        if (nc == 4) cCol[o + 3] = ca;
+                    }
+                }
+                p.ca.set(0, p.verts, cCol);
+            }
+        }
     }
 
     private void flushPart(int k, int b, int gx, int gz) {
@@ -529,8 +669,21 @@ public final class LevelRenderer {
             min[a] = lo / u;
             if (hi / u - lo / u > 255) bytes = false;
         }
+        // развёртка байтами со сдвигом, если по обеим осям хватает 256 значений
+        short[] uv = cUv;
+        int u0 = Integer.MAX_VALUE, u1 = Integer.MIN_VALUE, v0 = Integer.MAX_VALUE, v1 = Integer.MIN_VALUE;
+        for (int j = 0, e = n * 2; j < e; j += 2) {
+            int u = uv[j], v = uv[j + 1];
+            if (u < u0) u0 = u;
+            if (u > u1) u1 = u;
+            if (v < v0) v0 = v;
+            if (v > v1) v1 = v;
+        }
+        boolean uvBytes = u1 - u0 <= 255 && v1 - v0 <= 255;
+        int nc = k == 0 ? 3 : 4;
         int cls = capClass(n), cap = CAPS[cls];
-        java.util.Vector pl = pool[cls * 2 + (bytes ? 1 : 0)];
+        int key = (((cls * 2 + (bytes ? 1 : 0)) * 2 + (uvBytes ? 1 : 0)) * 2) + k;
+        java.util.Vector pl = pool[key];
         Part part;
         if (pl.size() > 0) {
             part = (Part) pl.elementAt(pl.size() - 1);
@@ -540,9 +693,13 @@ public final class LevelRenderer {
             part = new Part();
             part.cls = cls;
             part.bytes = bytes;
+            part.key = key;
+            part.comps = nc;
             part.pa = new VertexArray(cap, 3, bytes ? 1 : 2);
-            part.ca = new VertexArray(cap, 4, 1);
-            part.ta = new VertexArray(cap, 2, 2);
+            part.ca = new VertexArray(cap, nc, 1);
+            part.ta = new VertexArray(cap, 2, uvBytes ? 1 : 2);
+            part.info = new short[cap >> 2];
+            if (uvBytes) part.uvBias = new float[2];
             part.vb = new VertexBuffer();
             part.vb.setColors(part.ca);
             part.vb.setTexCoords(0, part.ta, 1f / 256f, null);
@@ -571,10 +728,28 @@ public final class LevelRenderer {
             bias[0] = bias[1] = bias[2] = 0;
             part.pa.set(0, cap, p);
         }
-        for (int d = n * 4; d < cap * 4; d++) cCol[d] = 0;
+        for (int d = n * nc; d < cap * nc; d++) cCol[d] = 0;
         part.ca.set(0, cap, cCol);
-        for (int d = n * 2; d < cap * 2; d++) cUv[d] = 0;
-        part.ta.set(0, cap, cUv);
+        System.arraycopy(cInfo, 0, part.info, 0, n >> 2);
+        if (uvBytes) {
+            int bu = u0 + 128, bv = v0 + 128;
+            byte[] b = bUv;
+            for (int j = 0, e = n * 2; j < e; j += 2) {
+                b[j] = (byte) (uv[j] - bu);
+                b[j + 1] = (byte) (uv[j + 1] - bv);
+            }
+            for (int d = n * 2; d < cap * 2; d += 2) {
+                b[d] = 0;
+                b[d + 1] = 0;
+            }
+            part.ta.set(0, cap, b);
+            part.uvBias[0] = bu / 256f;
+            part.uvBias[1] = bv / 256f;
+            part.vb.setTexCoords(0, part.ta, 1f / 256f, part.uvBias);
+        } else {
+            for (int d = n * 2; d < cap * 2; d++) cUv[d] = 0;
+            part.ta.set(0, cap, cUv);
+        }
         part.vb.setPositions(part.pa, 1f, bias);
         Appearance ap = k == 0 ? meshApp[0] : blendApp[0];
         if (part.mesh.getAppearance(0) != ap) part.mesh.setAppearance(0, ap);
@@ -601,7 +776,18 @@ public final class LevelRenderer {
     private void combineDirty(long start, int budgetMs) {
         long t0 = Prof.t();
         int done = 0;
+        boolean lt = false;
         for (int g = 0; g < NG; g++) {
+            if (grpRecolor[g] && !grpDirty[g]) {
+                if (done > 0 && System.currentTimeMillis() - start > budgetMs) continue;
+                if (!lt) {
+                    lightTable();
+                    lt = true;
+                }
+                recolor(g);
+                done++;
+                continue;
+            }
             if (!grpDirty[g]) continue;
             // столбец склеивается, когда пересчитаны все его секции (иначе волна перестройки склеивает его много раз);
             // за кадр — хотя бы один, дальше — пока не вышел бюджет

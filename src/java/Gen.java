@@ -216,13 +216,9 @@ public final class Gen {
         }
     }
 
-    // Mth::sin/cos 0.6.1: таблица из 65536 float, _sin[i] = sin(i / _sinScale)
-    private static final float[] SIN = new float[65536];
+    // Mth::sin/cos 0.6.1: таблица из 65536 float, _sin[i] = sin(i / _sinScale) — та же, что у Mth
+    private static final float[] SIN = Mth.SIN;
     private static final float SIN_SCALE = 65536.0f / (2.0f * Mth.PI);
-
-    static {
-        for (int i = 0; i < 65536; i++) SIN[i] = (float) Math.sin(i / SIN_SCALE);
-    }
 
     static float msin(float x) {
         return SIN[(int) (x * SIN_SCALE) & 65535];

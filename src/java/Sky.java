@@ -42,7 +42,7 @@ public final class Sky {
         skyApp.setFog(skyFog);
         skyApp.setCompositingMode(noDepth(false));
         skyApp.setPolygonMode(noCull());
-        Texture2D tex = new Texture2D(new Image2D(Image2D.RGBA, R.img("/environment/clouds.png")));
+        Texture2D tex = new Texture2D(R.image2D("/environment/clouds.png"));
         tex.setFiltering(Texture2D.FILTER_BASE_LEVEL, Texture2D.FILTER_NEAREST);
         tex.setWrapping(Texture2D.WRAP_REPEAT, Texture2D.WRAP_REPEAT);
         tex.setBlending(Texture2D.FUNC_MODULATE);

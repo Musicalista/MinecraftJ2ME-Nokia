@@ -1,11 +1,11 @@
 /**
  * Слой мира, сжатый в памяти (приём из MicroCraft): чанк 16x16x128 делится на 32 куска 16x16x4, и каждый кусок
- * хранится в самом коротком виде — одно значение на весь кусок, палитра + 1/2/4 бита на клетку или сырые значения
- * (8 бит у блоков, 4 у тетрад data и света). Сырые массивы мира занимали 20 МБ — больше, чем весь хип E75 и Asha.
+ * хранится в самом коротком виде — одно значение на весь кусок, палитра + 1..7 бит на клетку (сколько нужно
+ * для числа значений: 5..8 значений — 3 бита) или сырые значения (8 бит у блоков, 4 у тетрад data и света). Сырые массивы мира занимали 20 МБ — больше, чем весь хип E75 и Asha.
  *
  * Снаружи индексы как в файле MCPE: чанк ch = cx | cz << 4 и клетка i = (x << 11) | (z << 7) | y.
  * Массив куска самоописывающий: [0] — бит на клетку, [1] — занято мест палитры, [2..] — палитра, в конце клетки
- * (128 * бит байт). Кусок подменяется одной записью ссылки — чтение из другого потока (сохранение в pauseApp)
+ * (128 * бит байт) и байт запаса: клетка может пересекать границу байта, читаются два байта. Кусок подменяется одной записью ссылки — чтение из другого потока (сохранение в pauseApp)
  * не увидит полуготовый кусок.
  */
 public final class Pal {
@@ -42,8 +42,8 @@ public final class Pal {
         byte[] a = arr[k];
         if (a == null) return uni[k] & 255;
         int c = ((i >> 5) & 0x3FC) | (i & 3);
-        int b = a[0], bp = c * b;
-        int v = (a[a.length - (b << 7) + (bp >> 3)] >> (bp & 7)) & ((1 << b) - 1);
+        int b = a[0], bp = c * b, o = a.length - 1 - (b << 7) + (bp >> 3);
+        int v = (((a[o] & 255) | (a[o + 1] << 8)) >> (bp & 7)) & ((1 << b) - 1);
         return b == maxBits ? v : a[2 + v] & 255;
     }
 
@@ -55,7 +55,7 @@ public final class Pal {
             int u = uni[k] & 255;
             if (u == v) return;
             // 1 бит: палитра [старое, новое]
-            a = new byte[2 + 2 + 128];
+            a = new byte[2 + 2 + 128 + 1];
             a[0] = 1;
             a[1] = 2;
             a[2] = (byte) u;
@@ -88,8 +88,10 @@ public final class Pal {
                 }
             }
         }
-        int bp = c * b, o = a.length - (b << 7) + (bp >> 3), sh = bp & 7;
-        a[o] = (byte) ((a[o] & ~(((1 << b) - 1) << sh)) | (idx << sh));
+        int bp = c * b, o = a.length - 1 - (b << 7) + (bp >> 3), sh = bp & 7;
+        int w = ((a[o] & 255) | ((a[o + 1] & 255) << 8)) & ~(((1 << b) - 1) << sh) | (idx << sh);
+        a[o] = (byte) w;
+        a[o + 1] = (byte) (w >> 8);
     }
 
     /** весь слой — одно значение */
@@ -122,10 +124,11 @@ public final class Pal {
             for (int c = 0; c < CELLS; c++) out[c] = u;
             return;
         }
-        int b = a[0], m = (1 << b) - 1, o = a.length - (b << 7);
+        int b = a[0], m = (1 << b) - 1, o = a.length - 1 - (b << 7);
         boolean raw = b == maxBits;
         for (int c = 0, bp = 0; c < CELLS; c++, bp += b) {
-            int v = (a[o + (bp >> 3)] >> (bp & 7)) & m;
+            int p = o + (bp >> 3);
+            int v = (((a[p] & 255) | (a[p + 1] << 8)) >> (bp & 7)) & m;
             out[c] = raw ? v : a[2 + v] & 255;
         }
     }
@@ -149,19 +152,21 @@ public final class Pal {
             fill(k, vals[0]);
             return;
         }
-        int b = n <= 2 ? 1 : n <= 4 ? 2 : n <= 16 ? 4 : 8;
+        int b = 1;
+        while ((1 << b) < n) b++;
         boolean raw = b >= maxBits;
         if (raw) b = maxBits;
         int o = raw ? 2 : 2 + (1 << b);
-        byte[] a = new byte[o + (b << 7)];
+        byte[] a = new byte[o + (b << 7) + 1];
         a[0] = (byte) b;
         if (!raw) {
             a[1] = (byte) n;
             for (int p = 0; p < n; p++) a[2 + p] = (byte) pal[p];
         }
         for (int c = 0, bp = 0; c < CELLS; c++, bp += b) {
-            int v = raw ? vals[c] : slot[vals[c]];
-            a[o + (bp >> 3)] |= (byte) (v << (bp & 7));
+            int v = (raw ? vals[c] : slot[vals[c]]) << (bp & 7);
+            a[o + (bp >> 3)] |= (byte) v;
+            a[o + (bp >> 3) + 1] |= (byte) (v >> 8);
         }
         arr[k] = a;
     }

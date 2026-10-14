@@ -35,7 +35,7 @@ public final class HandRenderer {
     }
 
     private static Texture2D tex(String path) {
-        Texture2D t = new Texture2D(new Image2D(Image2D.RGBA, R.img(path)));
+        Texture2D t = new Texture2D(R.image2D(path));
         t.setFiltering(Texture2D.FILTER_BASE_LEVEL, Texture2D.FILTER_NEAREST);
         t.setWrapping(Texture2D.WRAP_CLAMP, Texture2D.WRAP_CLAMP);
         t.setBlending(Texture2D.FUNC_MODULATE);

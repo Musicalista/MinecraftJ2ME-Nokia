@@ -2,7 +2,8 @@
 public final class Mth {
     public static final float PI = 3.1415927f;
     public static final float DEG = PI / 180f;
-    private static final float[] SIN = new float[65536];
+    /** Mth::_sin 0.6.1 — общая с генератором мира (Gen.msin), одна таблица на 256 КБ вместо двух */
+    static final float[] SIN = new float[65536];
     private static final java.util.Random RND = new java.util.Random();
 
     /** 0..1, замена Math.random() (её нет в CLDC). */
@@ -11,7 +12,8 @@ public final class Mth {
     }
 
     static {
-        for (int i = 0; i < 65536; i++) SIN[i] = (float) Math.sin(i * Math.PI * 2.0 / 65536.0);
+        float scale = 65536.0f / (2.0f * PI);
+        for (int i = 0; i < 65536; i++) SIN[i] = (float) Math.sin(i / scale);
     }
 
     public static float sin(float a) {

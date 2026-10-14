@@ -1,5 +1,4 @@
 import java.util.Hashtable;
-import javax.microedition.lcdui.Image;
 import javax.microedition.m3g.*;
 
 /** Отрисовка мобов, предметов, стрел и TNT. */
@@ -23,8 +22,7 @@ public final class EntityRenderer {
     private Appearance app(String path) {
         Appearance a = (Appearance) apps.get(path);
         if (a != null) return a;
-        Image im = R.img(path);
-        Texture2D tex = new Texture2D(new Image2D(Image2D.RGBA, im));
+        Texture2D tex = new Texture2D(R.image2D(path));
         tex.setFiltering(Texture2D.FILTER_BASE_LEVEL, Texture2D.FILTER_NEAREST);
         tex.setWrapping(Texture2D.WRAP_CLAMP, Texture2D.WRAP_CLAMP);
         tex.setBlending(Texture2D.FUNC_MODULATE);

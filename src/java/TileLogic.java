@@ -177,19 +177,20 @@ public final class TileLogic {
         } else l.setData(x, y, z, age + 1);
     }
 
-    private static final int[] leafBuf = new int[32 * 32 * 32];
+    /** куб 16^3 вместо 32^3 оригинала: обход трогает только клетки в радиусе R + 1 от центра */
+    private static final byte[] leafBuf = new byte[16 * 16 * 16];
 
     /** LeafTile::tick: опадание без бревна в радиусе 4 (по связности листвы). */
     private static void leafTick(Level l, int x, int y, int z) {
         int cur = l.getData(x, y, z);
         if ((cur & 4) == 0 || (cur & 8) != 0) return;
-        final int R = 4, W = 32, WW = W * W, WO = W / 2;
-        int[] b = leafBuf;
+        final int R = 4, W = 16, WW = W * W, WO = W / 2;
+        byte[] b = leafBuf;
         for (int xo = -R; xo <= R; xo++)
             for (int yo = -R; yo <= R; yo++)
                 for (int zo = -R; zo <= R; zo++) {
                     int t = l.getTile(x + xo, y + yo, z + zo);
-                    b[(xo + WO) * WW + (yo + WO) * W + (zo + WO)] = t == Tile.LOG ? 0 : (t == Tile.LEAVES ? -2 : -1);
+                    b[(xo + WO) * WW + (yo + WO) * W + (zo + WO)] = (byte) (t == Tile.LOG ? 0 : (t == Tile.LEAVES ? -2 : -1));
                 }
         for (int i = 1; i <= R; i++)
             for (int xo = -R; xo <= R; xo++)
@@ -197,12 +198,13 @@ public final class TileLogic {
                     for (int zo = -R; zo <= R; zo++) {
                         int p = (xo + WO) * WW + (yo + WO) * W + (zo + WO);
                         if (b[p] != i - 1) continue;
-                        if (b[p - WW] == -2) b[p - WW] = i;
-                        if (b[p + WW] == -2) b[p + WW] = i;
-                        if (b[p - W] == -2) b[p - W] = i;
-                        if (b[p + W] == -2) b[p + W] = i;
-                        if (b[p - 1] == -2) b[p - 1] = i;
-                        if (b[p + 1] == -2) b[p + 1] = i;
+                        byte bi = (byte) i;
+                        if (b[p - WW] == -2) b[p - WW] = bi;
+                        if (b[p + WW] == -2) b[p + WW] = bi;
+                        if (b[p - W] == -2) b[p - W] = bi;
+                        if (b[p + W] == -2) b[p + W] = bi;
+                        if (b[p - 1] == -2) b[p - 1] = bi;
+                        if (b[p + 1] == -2) b[p + 1] = bi;
                     }
         if (b[WO * WW + WO * W + WO] >= 0) l.setDataNoUpdate(x, y, z, cur & ~4);
         else {

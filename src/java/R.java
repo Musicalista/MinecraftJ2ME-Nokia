@@ -1,6 +1,5 @@
 import java.util.Hashtable;
 import javax.microedition.lcdui.*;
-import javax.microedition.lcdui.game.Sprite;
 import javax.microedition.m3g.Image2D;
 
 /**
@@ -16,57 +15,62 @@ public final class R {
     public static Tex terrain;
     public static Image2D terrain2D;
     public static final int[] charW = new int[256];
-    private static int[] fontPx;
+    /** шрифт default8.png 128x128 */
+    private static Pix font;
     private static final Hashtable texById = new Hashtable();
     private static int texIds;
 
     /**
-     * Текстура: исходная картинка и копия, увеличенная под текущий k. Пиксели в хипе не держатся (раньше каждая
-     * 256x256 занимала int[] на 256 КБ — 2 МБ на интерфейс): нужные куски читаются из картинки по запросу.
+     * Текстура интерфейса: пиксели в сжатом виде (Pix — байт на пиксель вместо четырёх у Image). Целых увеличенных
+     * копий не держится: на экран идут только нужные куски, увеличенные под k (кэш в blit/stretchedPx).
      */
     public static final class Tex {
         public final int id, w, h;
-        final Image src;
-        private Image img;
-        private float imgK = -1;
+        final Pix pix;
 
-        Tex(Image src) {
-            this.src = src;
-            this.w = src.getWidth();
-            this.h = src.getHeight();
+        Tex(Pix pix) {
+            this.pix = pix;
+            this.w = pix.w;
+            this.h = pix.h;
             id = ++texIds;
-        }
-
-        Image scaled() {
-            if (imgK != k) {
-                img = null;
-                img = k == 1f ? src : scaleImage(region(0, 0, w, h), w, h, k);
-                imgK = k;
-            }
-            return img;
         }
 
         /** пиксели ARGB прямоугольника (x, y, rw, rh) */
         int[] region(int x, int y, int rw, int rh) {
-            int[] p = new int[rw * rh];
-            src.getRGB(p, 0, rw, x, y, rw, rh);
-            return p;
+            return pix.region(x, y, rw, rh);
         }
     }
 
     public static Tex tex(String path) {
-        return new Tex(img(path));
+        return new Tex(new Pix(img(path)));
+    }
+
+    private static final Hashtable image2D = new Hashtable();
+
+    /**
+     * Общая текстура M3G по пути: одна Image2D на картинку (раньше items.png создавалась трижды — частицы, рука,
+     * предметы на земле). Палитровая, если цветов не больше 256.
+     */
+    public static Image2D image2D(String path) {
+        Image2D im = (Image2D) image2D.get(path);
+        if (im == null) {
+            if (path.equals("/terrain.png")) im = terrain2D;
+            else if (path.equals("/gui/items.png")) im = items.pix.image2D();
+            else if (path.equals("/font/default8.png")) im = font.image2D();
+            else im = new Pix(img(path)).image2D();
+            image2D.put(path, im);
+        }
+        return im;
     }
 
     public static void load() {
-        Image ti = img("/terrain.png");
-        terrain = new Tex(ti);
-        terrain2D = new Image2D(Image2D.RGBA, ti);
+        terrain = tex("/terrain.png");
+        terrain2D = terrain.pix.image2D();
         gui = tex("/gui/gui.png");
         // хотбар рисуется без смешивания, с alpha-test: полупрозрачное — непрозрачно, прозрачное — дырка
         int[] at = gui.region(0, 0, gui.w, gui.h);
         for (int i = 0; i < at.length; i++) at[i] = (at[i] >>> 24) > 25 ? at[i] | 0xFF000000 : 0;
-        guiAT = new Tex(Image.createRGBImage(at, gui.w, gui.h, true));
+        guiAT = new Tex(new Pix(at, gui.w, gui.h));
         at = null;
         dots = tex("/gui/dots.png");
         icons = tex("/gui/icons.png");
@@ -106,15 +110,17 @@ public final class R {
             if (c == ' ') x = 2;
             charW[c] = x + 2;
         }
-        fontPx = px;
+        font = new Pix(px, 128, 128);
     }
 
     /** Новый масштаб: сбросить увеличенные копии. */
     public static void setScale(float scale, int screenW, int screenH) {
         if (scale != k) {
             stretchCache.clear();
+            blitCache.clear();
+            mapCache.clear();
             iconCache.clear();
-            fontCache.clear();
+            glyphCache.clear();
             dirtCache.clear();
         }
         k = scale;
@@ -164,13 +170,45 @@ public final class R {
 
     // ---- картинки ----
 
-    /** Кусок текстуры 1:1 (тексель = пиксель GUI). */
+    private static final Hashtable blitCache = new Hashtable(), mapCache = new Hashtable();
+
+    /** Тексель для пикселя целой увеличенной картинки длиной n текселей при масштабе kk (как в scaleImage). */
+    private static int[] scaleMap(int n, float kk) {
+        Long key = new Long(((long) Float.floatToIntBits(kk) << 32) | n);
+        int[] m = (int[]) mapCache.get(key);
+        if (m == null) {
+            m = map(n, Math.max(1, (int) (n * kk + 0.5f)), kk);
+            mapCache.put(key, m);
+        }
+        return m;
+    }
+
+    /**
+     * Кусок текстуры 1:1 (тексель = пиксель GUI). Пиксели те же, что у куска целой картинки, увеличенной под k,
+     * но в хипе держится только сам кусок.
+     */
     public static void blit(Graphics g, Tex t, float x, float y, int u, int v, int w, int h) {
         if (w <= 0 || h <= 0) return;
-        Image im = t.scaled();
         int su = b(u), sv = b(v), sw = b(u + w) - su, sh = b(v + h) - sv;
         if (sw <= 0 || sh <= 0) return;
-        g.drawRegion(im, su, sv, sw, sh, Sprite.TRANS_NONE, px(x), px(y), Graphics.TOP | Graphics.LEFT);
+        Long key = new Long(((long) t.id << 52) | ((long) u << 43) | ((long) v << 34) | ((long) w << 25) | ((long) h << 16));
+        Image im = (Image) blitCache.get(key);
+        if (im == null) {
+            int[] mx = scaleMap(t.w, k), my = scaleMap(t.h, k);
+            int[] src = t.region(u, v, w, h);
+            int[] out = new int[sw * sh];
+            for (int yy = 0; yy < sh; yy++) {
+                int ty = Math.min(h - 1, Math.max(0, my[Math.min(my.length - 1, sv + yy)] - v));
+                for (int xx = 0; xx < sw; xx++) {
+                    int tx = Math.min(w - 1, Math.max(0, mx[Math.min(mx.length - 1, su + xx)] - u));
+                    out[yy * sw + xx] = src[ty * w + tx];
+                }
+            }
+            im = Image.createRGBImage(out, sw, sh, true);
+            if (blitCache.size() > 300) blitCache.clear();
+            blitCache.put(key, im);
+        }
+        g.drawImage(im, px(x), px(y), Graphics.TOP | Graphics.LEFT);
     }
 
     private static final Hashtable stretchCache = new Hashtable();
@@ -355,24 +393,29 @@ public final class R {
 
     // ---- шрифт ----
 
-    private static final Hashtable fontCache = new Hashtable();
+    /**
+     * Глифы шрифта по цвету и размеру: раньше на каждый цвет делалась копия всего листа 128x128 (увеличенная под k),
+     * в хипе их было больше десятка. Глиф — те же пиксели, что у куска такой копии.
+     */
+    private static final Hashtable glyphCache = new Hashtable();
 
-    /** Шрифт default8.png цвета color, тексел = fs пикселей GUI. */
-    private static Image fontFor(int color, float fs) {
-        color &= 0xFFFFFF;
-        Long key = new Long(((long) Float.floatToIntBits(fs) << 32) | color);
-        Image im = (Image) fontCache.get(key);
+    private static Image glyph(int c, int color, float fs, int su, int sv, int sw, int sh, int[] m) {
+        Long key = new Long(((long) Float.floatToIntBits(fs) << 32) | ((long) color << 8) | c);
+        Image im = (Image) glyphCache.get(key);
         if (im == null) {
-            int[] p = new int[128 * 128];
+            int[] p = new int[sw * sh];
             int r = (color >> 16) & 255, gg = (color >> 8) & 255, bb = color & 255;
-            for (int i = 0; i < p.length; i++) {
-                int c = fontPx[i];
-                if ((c >>> 24) < 128) continue;
-                p[i] = 0xFF000000 | ((((c >> 16) & 255) * r / 255) << 16) | ((((c >> 8) & 255) * gg / 255) << 8) | ((c & 255) * bb / 255);
+            for (int yy = 0; yy < sh; yy++) {
+                int ty = m[Math.min(m.length - 1, sv + yy)];
+                for (int xx = 0; xx < sw; xx++) {
+                    int cc = font.get(m[Math.min(m.length - 1, su + xx)], ty);
+                    if ((cc >>> 24) < 128) continue;
+                    p[yy * sw + xx] = 0xFF000000 | ((((cc >> 16) & 255) * r / 255) << 16) | ((((cc >> 8) & 255) * gg / 255) << 8) | ((cc & 255) * bb / 255);
+                }
             }
-            im = scaleImage(p, 128, 128, k * fs);
-            if (fontCache.size() > 40) fontCache.clear();
-            fontCache.put(key, im);
+            im = Image.createRGBImage(p, sw, sh, true);
+            if (glyphCache.size() > 600) glyphCache.clear();
+            glyphCache.put(key, im);
         }
         return im;
     }
@@ -393,8 +436,9 @@ public final class R {
 
     /** Font::draw; fs — размер тексела шрифта в пикселях GUI. */
     public static void text(Graphics g, String t, float x, float y, int color, float fs) {
-        Image f = fontFor(color, fs);
+        color &= 0xFFFFFF;
         float kk = k * fs;
+        int[] m = scaleMap(128, kk);
         int Y = px(y);
         int adv = 0;
         for (int i = 0; i < t.length(); i++) {
@@ -405,7 +449,7 @@ public final class R {
                 int u = (c & 15) * 8, v = (c >> 4) * 8;
                 int su = (int) (u * kk + 0.5f), sv = (int) (v * kk + 0.5f);
                 int sw = (int) ((u + w) * kk + 0.5f) - su, sh = (int) ((v + 8) * kk + 0.5f) - sv;
-                if (sw > 0 && sh > 0) g.drawRegion(f, su, sv, sw, sh, Sprite.TRANS_NONE, px(x + adv * fs), Y, Graphics.TOP | Graphics.LEFT);
+                if (sw > 0 && sh > 0) g.drawImage(glyph(c, color, fs, su, sv, sw, sh, m), px(x + adv * fs), Y, Graphics.TOP | Graphics.LEFT);
             }
             adv += charW[c];
         }
@@ -496,6 +540,7 @@ public final class R {
                 p[i] = c;
             }
             im = Image.createRGBImage(p, N, N, true);
+            if (iconCache.size() > 200) iconCache.clear();
             iconCache.put(key, im);
         }
         g.drawImage(im, px(x), px(y), Graphics.TOP | Graphics.LEFT);
