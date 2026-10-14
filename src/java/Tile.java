@@ -142,7 +142,9 @@ public final class Tile {
         reg(SNOW_LAYER, "snow", 66, 0.1f, M_SNOW).shape(S_SNOW).tool();
         replaceable[SNOW_LAYER] = true;
         reg(ICE, "ice", 67, 0.5f, M_ICE);
-        layer[ICE] = L_BLEND; opaque[ICE] = false; lightBlock[ICE] = 3;
+        // IceTile 0.6.1 не переопределяет isSolidRender/getRenderLayer: непрозрачный блок слоя OPAQUE (текстура без альфы),
+        // свет гасит на 3 (setLightBlock). Полупрозрачным он рисовал нижние грани и воду подо льдом поверх верха.
+        lightBlock[ICE] = 3;
         reg(SNOW, "snow", 66, 0.2f, M_SNOW).tool();
         reg(CACTUS, "cactus", 70, 0.4f, M_PLANT).topBottom(69, 71).shape(S_CACTUS);
         layer[CACTUS] = L_CUTOUT;

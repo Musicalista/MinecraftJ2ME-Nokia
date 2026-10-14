@@ -382,13 +382,14 @@ public final class Gen {
     private PNoise lperlin1, lperlin2, perlin1, perlin2, perlin3, scaleNoise, depthNoise, forestNoise;
     private float[] buffer, pnr, ar, br, sr, dr;
     private final float[] sandBuf = new float[256], gravelBuf = new float[256], depthBuf = new float[256];
-    private final int[] hm;
-    private final int[] freshStamp;
+    private final short[] hm;
+    private final short[] freshStamp;
     private int step = 1;
     private boolean instaTick, noNeighborUpdate;
     private boolean spawnMobs;
     /** отложенные тики (гравий руд, «разбуженная» вода) — в оригинале срабатывают в первые тики игры */
     private int[] heavy = new int[1024];
+    private byte[] chunkBuf = new byte[32768];
     private int heavyN;
 
     public Gen(Level l, long seed) {
@@ -405,8 +406,8 @@ public final class Gen {
         depthNoise = new PNoise(random, 16);
         forestNoise = new PNoise(random, 8);
         bs = new BiomeSource(this.seed);
-        hm = new int[256 * 256];
-        freshStamp = new int[256 * 256];
+        hm = new short[256 * 256];
+        freshStamp = new short[256 * 256];
         spawnMobs = l.gameType == 0;
     }
 
@@ -425,7 +426,7 @@ public final class Gen {
     int getTile(int x, int y, int z) {
         if (y < 0 || y >= 128) return 0;
         if ((x & ~255) != 0 || (z & ~255) != 0) return Tile.INVISIBLE_BEDROCK;
-        return l.blocks[(x >> 4) | ((z >> 4) << 4)][((x & 15) << 11) | ((z & 15) << 7) | y] & 255;
+        return l.blocks.get((x >> 4) | ((z >> 4) << 4), ((x & 15) << 11) | ((z & 15) << 7) | y);
     }
 
     int getData(int x, int y, int z) {
@@ -446,12 +447,12 @@ public final class Gen {
         int i = x | (z << 8);
         int yOld = hm[i], y = yOld;
         if (yStart > yOld) y = yStart;
-        byte[] b = l.blocks[(x >> 4) | ((z >> 4) << 4)];
-        int p = ((x & 15) << 11) | ((z & 15) << 7);
-        while (y > 0 && LIGHT_BLOCK[b[p + y - 1] & 255] == 0) y--;
+        Pal b = l.blocks;
+        int c = (x >> 4) | ((z >> 4) << 4), p = ((x & 15) << 11) | ((z & 15) << 7);
+        while (y > 0 && LIGHT_BLOCK[b.get(c, p + y - 1)] == 0) y--;
         if (y == yOld) return;
-        hm[i] = y;
-        freshStamp[i] = step;
+        hm[i] = (short) y;
+        freshStamp[i] = (short) step;
     }
 
     /** LevelChunk::setTile / setTileAndData (+ onPlace), без обновления соседей. */
@@ -463,12 +464,12 @@ public final class Gen {
             return l.setTileAndData(x, y, z, id, data) || true;
         }
         int c = (x >> 4) | ((z >> 4) << 4), i = ((x & 15) << 11) | ((z & 15) << 7) | y;
-        int old = l.blocks[c][i] & 255;
+        int old = l.blocks.get(c, i);
         if (withData) {
-            if (old == id && Level.getNibble(l.data[c], i) == data) return false;
+            if (old == id && l.data.get(c, i) == data) return false;
         } else if (old == id) return false;
-        l.blocks[c][i] = (byte) id;
-        Level.setNibble(l.data[c], i, withData ? data : 0);
+        l.blocks.set(c, i, id);
+        l.data.set(c, i, withData ? data : 0);
         int col = x | (z << 8);
         if (LIGHT_BLOCK[id] != 0) {
             if (y >= hm[col]) recalcHeight(x, y + 1, z);
@@ -490,7 +491,7 @@ public final class Gen {
         if (y < 0 || y >= 128 || (x & ~255) != 0 || (z & ~255) != 0) return;
         if (l.getData(x, y, z) != d) {
             int c = (x >> 4) | ((z >> 4) << 4), i = ((x & 15) << 11) | ((z & 15) << 7) | y;
-            Level.setNibble(l.data[c], i, d);
+            l.data.set(c, i, d);
             updateNeighborsAt(x, y, z);
         }
     }
@@ -842,6 +843,7 @@ public final class Gen {
         }
         instaTick = false;
         heavy = null;
+        chunkBuf = null;
         if (pr != null) pr.progress("Building terrain", 92);
         l.recalcAllLight();
         setInitialSpawn();
@@ -871,7 +873,9 @@ public final class Gen {
 
     private void createChunk(int xOffs, int zOffs) {
         random.setSeed(xOffs * 341872712 + zOffs * 132899541);
-        byte[] blocks = l.blocks[xOffs | (zOffs << 4)];
+        // чанк собирается в сыром буфере и потом сжимается в мир
+        byte[] blocks = chunkBuf;
+        for (int i = 0; i < blocks.length; i++) blocks[i] = 0;
         bs.getBiomeBlock(xOffs * 16, zOffs * 16, 16, 16);
         prepareHeights(xOffs, zOffs, blocks, bs.temperatures);
         buildSurfaces(xOffs, zOffs, blocks, bs.biomes);
@@ -880,8 +884,9 @@ public final class Gen {
             for (int z = 0; z < 16; z++) {
                 int y = 127, p = x << 11 | z << 7;
                 while (y > 0 && LIGHT_BLOCK[blocks[p + y - 1] & 255] == 0) y--;
-                hm[(xOffs * 16 + x) | ((zOffs * 16 + z) << 8)] = y;
+                hm[(xOffs * 16 + x) | ((zOffs * 16 + z) << 8)] = (short) y;
             }
+        l.blocks.importChunk(xOffs | (zOffs << 4), blocks, false);
     }
 
     private void prepareHeights(int xOffs, int zOffs, byte[] blocks, float[] temperatures) {

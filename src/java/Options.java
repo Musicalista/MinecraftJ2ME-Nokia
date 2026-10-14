@@ -7,7 +7,7 @@ import javax.microedition.rms.RecordStore;
 public final class Options {
     public static String username = "Steve";
     public static boolean serverVisible = true;
-    public static boolean fancyGraphics, lowQuality;
+    public static boolean fancyGraphics = true, lowQuality;
     /** ползунок 0..100 (ctrl_sensitivity), по умолчанию 50 */
     public static int sensitivitySlider = 50;
     public static boolean invertY, lefty;
@@ -15,7 +15,9 @@ public final class Options {
     public static boolean peaceful;
     public static boolean sound = true, thirdPerson;
     // ---- раздел Custom (отступление от оригинала) ----
-    public static boolean showFps, autoJump;
+    public static boolean showFps, autoJump = true;
+    /** ники над игроками сети (в релизе 0.6.1 их нет — появились в 0.6.2 Beta/0.7.0) */
+    public static boolean nameTags = true;
     /** поворот экрана: 0 — как у устройства, 1 — альбомный, 2 — портретный */
     public static int orientation;
     public static final String[] ORIENTATION_NAME = { "Auto", "Landscape", "Portrait" };
@@ -78,12 +80,18 @@ public final class Options {
             else if (k.equals("thirdperson")) thirdPerson = b;
             else if (k.equals("custom_showfps")) showFps = b;
             else if (k.equals("custom_autojump")) autoJump = b;
+            else if (k.equals("custom_nametags")) nameTags = b;
             else if (k.equals("custom_orientation")) orientation = Mth.clamp(num(v, 0), 0, 2);
             else if (k.equals("custom_ctrlsize")) ctrlSize = Mth.clamp(num(v, 50), CTRL_MIN, CTRL_MAX);
             else if (k.equals("custom_dpadx")) dpadX = Mth.clamp(num(v, -1), -1, 1000);
             else if (k.equals("custom_dpady")) dpadY = Mth.clamp(num(v, -1), -1, 1000);
             else if (k.equals("custom_pausex")) pauseX = Mth.clamp(num(v, -1), -1, 1000);
             else if (k.equals("custom_pausey")) pauseY = Mth.clamp(num(v, -1), -1, 1000);
+            else if (k.startsWith("key_pad_") || k.startsWith("key_qw_")) {
+                int sc = k.startsWith("key_pad_") ? 0 : 1;
+                String id = k.substring(sc == 0 ? 8 : 7);
+                for (int i = 0; i < Keys.N; i++) if (Keys.ID[i].equals(id)) Keys.bind[sc][i] = num(v, Keys.bind[sc][i]);
+            }
         }
     }
 
@@ -111,12 +119,17 @@ public final class Options {
         sb.append("thirdperson:").append(thirdPerson).append('\n');
         sb.append("custom_showfps:").append(showFps).append('\n');
         sb.append("custom_autojump:").append(autoJump).append('\n');
+        sb.append("custom_nametags:").append(nameTags).append('\n');
         sb.append("custom_orientation:").append(orientation).append('\n');
         sb.append("custom_ctrlsize:").append(ctrlSize).append('\n');
         sb.append("custom_dpadx:").append(dpadX).append('\n');
         sb.append("custom_dpady:").append(dpadY).append('\n');
         sb.append("custom_pausex:").append(pauseX).append('\n');
         sb.append("custom_pausey:").append(pauseY).append('\n');
+        for (int i = 0; i < Keys.N; i++) {
+            sb.append("key_pad_").append(Keys.ID[i]).append(':').append(Keys.bind[0][i]).append('\n');
+            sb.append("key_qw_").append(Keys.ID[i]).append(':').append(Keys.bind[1][i]).append('\n');
+        }
         try {
             byte[] b = sb.toString().getBytes("UTF-8");
             RecordStore rs = RecordStore.openRecordStore("mcpe_options2", true);

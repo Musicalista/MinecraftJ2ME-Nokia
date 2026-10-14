@@ -27,8 +27,10 @@ public final class OptionsScreen extends Screen {
             { "c", "Custom" },
             { "b", "Show FPS", "Frames per second in the top left corner" },
             { "b", "Auto jump", "Jump onto one-block obstacles automatically" },
+            { "b", "Show name tags", "Player names above heads in multiplayer" },
             { "o", "Screen orientation", "" },
             { "a", "Touch controls", "Position and size of the D-Pad and the pause button" },
+            { "k", "Keys", "Reassign keypad and QWERTY keys" },
     };
     private Font fTitle = Font.getFont(Font.FACE_PROPORTIONAL, Font.STYLE_PLAIN, Font.SIZE_LARGE);
     private final Font fSum = Font.getFont(Font.FACE_PROPORTIONAL, Font.STYLE_PLAIN, Font.SIZE_SMALL);
@@ -109,7 +111,7 @@ public final class OptionsScreen extends Screen {
 
     private String summary(int i) {
         if (i == 1) return "'" + Options.username + "'";
-        if (i == 17) return Options.ORIENTATION_NAME[Options.orientation];
+        if (i == 18) return Options.ORIENTATION_NAME[Options.orientation];
         return ITEMS[i].length > 2 ? ITEMS[i][2] : "";
     }
 
@@ -129,6 +131,7 @@ public final class OptionsScreen extends Screen {
             case 13: return Options.peaceful;
             case 15: return Options.showFps;
             case 16: return Options.autoJump;
+            case 17: return Options.nameTags;
         }
         return false;
     }
@@ -147,6 +150,7 @@ public final class OptionsScreen extends Screen {
             case 13: Options.peaceful = !Options.peaceful; break;
             case 15: Options.showFps = !Options.showFps; break;
             case 16: Options.autoJump = !Options.autoJump; break;
+            case 17: Options.nameTags = !Options.nameTags; break;
         }
         Options.save();
     }
@@ -407,6 +411,9 @@ public final class OptionsScreen extends Screen {
         } else if (ITEMS[i][0].equals("a")) {
             Options.save();
             mc.setScreen(new ControlsScreen());
+        } else if (ITEMS[i][0].equals("k")) {
+            Options.save();
+            mc.setScreen(new KeysScreen());
         }
         else if (ITEMS[i][0].equals("s")) {
             sliderValue = Options.sensitivitySlider;

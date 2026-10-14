@@ -308,13 +308,17 @@ public final class NetClient {
         send(o);
     }
 
+    private final byte[] chunkB = new byte[32768], chunkD = new byte[16384];
+
     /** handle(ChunkDataPacket): изменённые столбцы поверх своей генерации. */
     private void onChunkData(NetIn in) {
         if (level == null) return;
         int cx = in.i32(), cz = in.i32();
         if (cx < 0 || cz < 0 || cx >= 16 || cz >= 16) return;
         int ci = cx | (cz << 4);
-        byte[] blocks = level.blocks[ci], data = level.data[ci];
+        byte[] blocks = chunkB, data = chunkD;
+        level.blocks.exportChunk(ci, blocks, false);
+        level.data.exportChunk(ci, data, true);
         boolean any = false;
         for (int i = 0; i < 256; i++) {
             int bits = in.u8();
@@ -332,6 +336,10 @@ public final class NetClient {
                 for (int k = 0; k < 8; k++) data[(p >> 1) + k] = (byte) in.u8();
             }
             level.updateMap[ci][i] |= (byte) bits;
+        }
+        if (any) {
+            level.blocks.importChunk(ci, blocks, false);
+            level.data.importChunk(ci, data, true);
         }
         if (any) mc.netChunkChanged(cx, cz, state == S_PLAYING);
         loaded[cx * 16 + cz] = true;

@@ -256,12 +256,18 @@ public final class Storage {
                 out.write(header);
                 byte[] pad = new byte[SECTORS_PER_CHUNK * 4096 - CHUNK_BYTES - 4];
                 byte[] len = le(CHUNK_BYTES + 4);
+                // слои мира сжаты (Pal): каждый чанк разворачивается в один буфер по очереди
+                byte[] raw = new byte[32768];
                 for (int i = 0; i < 256; i++) {
                     out.write(len);
-                    out.write(l.blocks[i]);
-                    out.write(l.data[i]);
-                    out.write(l.sky[i]);
-                    out.write(l.blk[i]);
+                    l.blocks.exportChunk(i, raw, false);
+                    out.write(raw, 0, 32768);
+                    l.data.exportChunk(i, raw, true);
+                    out.write(raw, 0, 16384);
+                    l.sky.exportChunk(i, raw, true);
+                    out.write(raw, 0, 16384);
+                    l.blk.exportChunk(i, raw, true);
+                    out.write(raw, 0, 16384);
                     out.write(l.updateMap[i]);
                     out.write(pad);
                     l.unsaved[i] = false;
@@ -407,23 +413,6 @@ public final class Storage {
                 Log.e("entities.dat", t);
             }
         }
-        // замена незнакомых блоков на «Update!» и старой шерсти (версия 1)
-        for (int c = 0; c < 256; c++) {
-            byte[] b = l.blocks[c];
-            for (int i = 0; i < 32768; i++) {
-                int id = b[i] & 255;
-                if (l.storageVersion == 1 && id >= 101 && id <= 115) {
-                    b[i] = (byte) Tile.WOOL;
-                    Level.setNibble(l.data[c], i, 15 - (id - 101));
-                    l.unsaved[c] = true;
-                    continue;
-                }
-                if (id != 0 && !Tile.exists[id]) {
-                    b[i] = (byte) Tile.UPDATE1;
-                    l.unsaved[c] = true;
-                }
-            }
-        }
         if (!hasLight) l.recalcAllLight();
         else l.recalcHeightmap();
         return l;
@@ -450,6 +439,7 @@ public final class Storage {
         }
         long pos = 4096;
         byte[] lenb = new byte[4];
+        byte[] b = new byte[32768], d = new byte[16384];
         for (int i = 0; i < n; i++) {
             long target = (long) sect[i] * 4096L;
             if (target < pos) continue;
@@ -460,21 +450,45 @@ public final class Storage {
             int len = le(lenb, 0) - 4;
             int c = idx[i];
             int got = 0;
-            got += readPart(in, l.blocks[c], len - got);
-            got += readPart(in, l.data[c], len - got);
+            got += readPart(in, b, 32768, len - got);
+            got += readPart(in, d, 16384, len - got);
+            fixBlocks(l, c, b, d);
+            l.blocks.importChunk(c, b, false);
+            l.data.importChunk(c, d, true);
             if (hasLight) {
-                got += readPart(in, l.sky[c], len - got);
-                got += readPart(in, l.blk[c], len - got);
+                got += readPart(in, b, 16384, len - got);
+                l.sky.importChunk(c, b, true);
+                got += readPart(in, b, 16384, len - got);
+                l.blk.importChunk(c, b, true);
             }
-            got += readPart(in, l.updateMap[c], len - got);
+            got += readPart(in, l.updateMap[c], 256, len - got);
             pos += got;
         }
     }
 
-    private static int readPart(InputStream in, byte[] dst, int left) throws IOException {
-        int n = Math.min(dst.length, Math.max(0, left));
-        readFully(in, dst, 0, n);
-        return n;
+    /** замена незнакомых блоков на «Update!» и старой шерсти (версия 1) */
+    private static void fixBlocks(Level l, int c, byte[] b, byte[] d) {
+        for (int i = 0; i < 32768; i++) {
+            int id = b[i] & 255;
+            if (l.storageVersion == 1 && id >= 101 && id <= 115) {
+                b[i] = (byte) Tile.WOOL;
+                Level.setNibble(d, i, 15 - (id - 101));
+                l.unsaved[c] = true;
+                continue;
+            }
+            if (id != 0 && !Tile.exists[id]) {
+                b[i] = (byte) Tile.UPDATE1;
+                l.unsaved[c] = true;
+            }
+        }
+    }
+
+    /** n байт куска (остаток — нули, как у недописанного чанка) */
+    private static int readPart(InputStream in, byte[] dst, int n, int left) throws IOException {
+        int r = Math.min(n, Math.max(0, left));
+        readFully(in, dst, 0, r);
+        for (int i = r; i < n; i++) dst[i] = 0;
+        return r;
     }
 
     private static void readFully(InputStream in, byte[] b, int off, int len) throws IOException {

@@ -5,13 +5,14 @@ import javax.microedition.m3g.*;
  * цвета RGBA. Квад пишется как отдельная полоса из 4 вершин (a, b, d, c) — без индексного массива.
  */
 public final class MeshBuilder {
-    public short[] pos = new short[3 * 4096];
-    public byte[] col = new byte[4 * 4096];
-    public short[] uv = new short[2 * 4096];
+    // начинаются с малого и растут (раньше каждый строитель сразу занимал ~60 КБ, частицам и рамкам столько не нужно)
+    public short[] pos = new short[3 * 64];
+    public byte[] col = new byte[4 * 64];
+    public short[] uv = new short[2 * 64];
     public int verts;
     /** по квадам: затенение << 8 | код света и альфа << 24 | оттенок — для пересчёта цвета (LevelRenderer.recolor) */
-    public short[] qLight = new short[1024];
-    public int[] qTint = new int[1024];
+    public short[] qLight = new short[16];
+    public int[] qTint = new int[16];
     /** параметры цвета следующих квадов (задаёт LevelRenderer.color) */
     public short curLight;
     public int curTint;

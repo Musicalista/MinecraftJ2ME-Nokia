@@ -1,0 +1,201 @@
+/**
+ * Слой мира, сжатый в памяти (приём из MicroCraft): чанк 16x16x128 делится на 32 куска 16x16x4, и каждый кусок
+ * хранится в самом коротком виде — одно значение на весь кусок, палитра + 1/2/4 бита на клетку или сырые значения
+ * (8 бит у блоков, 4 у тетрад data и света). Сырые массивы мира занимали 20 МБ — больше, чем весь хип E75 и Asha.
+ *
+ * Снаружи индексы как в файле MCPE: чанк ch = cx | cz << 4 и клетка i = (x << 11) | (z << 7) | y.
+ * Массив куска самоописывающий: [0] — бит на клетку, [1] — занято мест палитры, [2..] — палитра, в конце клетки
+ * (128 * бит байт). Кусок подменяется одной записью ссылки — чтение из другого потока (сохранение в pauseApp)
+ * не увидит полуготовый кусок.
+ */
+public final class Pal {
+    public static final int NP = 32, CELLS = 1024;
+    final int maxBits;
+    private final byte[][] arr = new byte[256 * NP][];
+    private final byte[] uni = new byte[256 * NP];
+    private final int[] tmp = new int[CELLS];
+    private final int[] stamp = new int[256], slot = new int[256];
+    private final int[] pal = new int[256];
+    private int st;
+
+    public Pal(int maxBits) {
+        this.maxBits = maxBits;
+    }
+
+    /** кусок: чанк и четвёрка по высоте */
+    static int key(int ch, int i) {
+        return (ch << 5) | ((i & 127) >> 2);
+    }
+
+    /** клетка внутри куска: (x << 6) | (z << 2) | (y & 3) */
+    static int cell(int i) {
+        return ((i >> 5) & 0x3FC) | (i & 3);
+    }
+
+    /** индекс клетки чанка по куску py и клетке c */
+    static int index(int py, int c) {
+        return ((c & ~3) << 5) | (py << 2) | (c & 3);
+    }
+
+    public int get(int ch, int i) {
+        int k = (ch << 5) | ((i & 127) >> 2);
+        byte[] a = arr[k];
+        if (a == null) return uni[k] & 255;
+        int c = ((i >> 5) & 0x3FC) | (i & 3);
+        int b = a[0], bp = c * b;
+        int v = (a[a.length - (b << 7) + (bp >> 3)] >> (bp & 7)) & ((1 << b) - 1);
+        return b == maxBits ? v : a[2 + v] & 255;
+    }
+
+    public void set(int ch, int i, int v) {
+        int k = (ch << 5) | ((i & 127) >> 2);
+        int c = ((i >> 5) & 0x3FC) | (i & 3);
+        byte[] a = arr[k];
+        if (a == null) {
+            int u = uni[k] & 255;
+            if (u == v) return;
+            // 1 бит: палитра [старое, новое]
+            a = new byte[2 + 2 + 128];
+            a[0] = 1;
+            a[1] = 2;
+            a[2] = (byte) u;
+            a[3] = (byte) v;
+            a[4 + (c >> 3)] = (byte) (1 << (c & 7));
+            arr[k] = a;
+            return;
+        }
+        int b = a[0], idx;
+        if (b == maxBits) idx = v;
+        else {
+            int n = a[1] & 255;
+            idx = -1;
+            for (int p = 0; p < n; p++)
+                if ((a[2 + p] & 255) == v) {
+                    idx = p;
+                    break;
+                }
+            if (idx < 0) {
+                if (n < (1 << b)) {
+                    a[2 + n] = (byte) v;
+                    a[1] = (byte) (n + 1);
+                    idx = n;
+                } else {
+                    // палитра полна: пересобрать кусок (заодно выкинуть неиспользуемые значения)
+                    decode(k, tmp);
+                    tmp[c] = v;
+                    encode(k, tmp);
+                    return;
+                }
+            }
+        }
+        int bp = c * b, o = a.length - (b << 7) + (bp >> 3), sh = bp & 7;
+        a[o] = (byte) ((a[o] & ~(((1 << b) - 1) << sh)) | (idx << sh));
+    }
+
+    /** весь слой — одно значение */
+    public void clear(int v) {
+        for (int k = 0; k < arr.length; k++) {
+            uni[k] = (byte) v;
+            arr[k] = null;
+        }
+    }
+
+    public boolean uniform(int k) {
+        return arr[k] == null;
+    }
+
+    public int uniformValue(int k) {
+        return uni[k] & 255;
+    }
+
+    /** весь кусок k — значение v */
+    public void fill(int k, int v) {
+        uni[k] = (byte) v;
+        arr[k] = null;
+    }
+
+    /** значения клеток куска (порядок cell) */
+    public void decode(int k, int[] out) {
+        byte[] a = arr[k];
+        if (a == null) {
+            int u = uni[k] & 255;
+            for (int c = 0; c < CELLS; c++) out[c] = u;
+            return;
+        }
+        int b = a[0], m = (1 << b) - 1, o = a.length - (b << 7);
+        boolean raw = b == maxBits;
+        for (int c = 0, bp = 0; c < CELLS; c++, bp += b) {
+            int v = (a[o + (bp >> 3)] >> (bp & 7)) & m;
+            out[c] = raw ? v : a[2 + v] & 255;
+        }
+    }
+
+    /** записать кусок самым коротким видом */
+    public void encode(int k, int[] vals) {
+        int s = ++st, n = 0;
+        if (s == 0) {
+            for (int j = 0; j < 256; j++) stamp[j] = 0;
+            s = st = 1;
+        }
+        for (int c = 0; c < CELLS; c++) {
+            int v = vals[c];
+            if (stamp[v] != s) {
+                stamp[v] = s;
+                slot[v] = n;
+                pal[n++] = v;
+            }
+        }
+        if (n == 1) {
+            fill(k, vals[0]);
+            return;
+        }
+        int b = n <= 2 ? 1 : n <= 4 ? 2 : n <= 16 ? 4 : 8;
+        boolean raw = b >= maxBits;
+        if (raw) b = maxBits;
+        int o = raw ? 2 : 2 + (1 << b);
+        byte[] a = new byte[o + (b << 7)];
+        a[0] = (byte) b;
+        if (!raw) {
+            a[1] = (byte) n;
+            for (int p = 0; p < n; p++) a[2 + p] = (byte) pal[p];
+        }
+        for (int c = 0, bp = 0; c < CELLS; c++, bp += b) {
+            int v = raw ? vals[c] : slot[vals[c]];
+            a[o + (bp >> 3)] |= (byte) (v << (bp & 7));
+        }
+        arr[k] = a;
+    }
+
+    /** чанк из сырого массива файла MCPE: блоки — байт на клетку, тетрады — 16384 байта (чётная клетка — младшая) */
+    public void importChunk(int ch, byte[] raw, boolean nibbles) {
+        int[] t = tmp;
+        for (int py = 0; py < NP; py++) {
+            for (int c = 0; c < CELLS; c++) {
+                int i = index(py, c);
+                t[c] = nibbles ? (raw[i >> 1] >> ((i & 1) << 2)) & 15 : raw[i] & 255;
+            }
+            encode((ch << 5) | py, t);
+        }
+    }
+
+    /** чанк в сырой массив файла MCPE */
+    public void exportChunk(int ch, byte[] raw, boolean nibbles) {
+        int[] t = new int[CELLS];
+        for (int py = 0; py < NP; py++) {
+            decode((ch << 5) | py, t);
+            for (int c = 0; c < CELLS; c++) {
+                int i = index(py, c);
+                if (!nibbles) raw[i] = (byte) t[c];
+                else if ((i & 1) == 0) raw[i >> 1] = (byte) ((raw[i >> 1] & 0xF0) | t[c]);
+                else raw[i >> 1] = (byte) ((raw[i >> 1] & 0x0F) | (t[c] << 4));
+            }
+        }
+    }
+
+    /** байт на куски (для отладки и замеров) */
+    public int bytes() {
+        int n = 0;
+        for (int k = 0; k < arr.length; k++) if (arr[k] != null) n += arr[k].length + 12;
+        return n;
+    }
+}

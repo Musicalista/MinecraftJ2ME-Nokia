@@ -12,54 +12,62 @@ public final class R {
     public static int gw = 320, gh = 240; // размер экрана в пикселях GUI
     public static Nine nineBg, nineSlot, nineSlotMarker, nineFrame, ninePlayerBg;
     public static Tex guiAT, dots, gui, icons, items, touch, sheet, title, frame, worldThumb, sign, fontTex;
-    public static int[] terrainPx;
+    /** terrain.png для иконок блоков (пиксели берутся тайлами по запросу) */
+    public static Tex terrain;
     public static Image2D terrain2D;
     public static final int[] charW = new int[256];
     private static int[] fontPx;
     private static final Hashtable texById = new Hashtable();
     private static int texIds;
 
-    /** Текстура: исходные пиксели и копия, увеличенная под текущий k. */
+    /**
+     * Текстура: исходная картинка и копия, увеличенная под текущий k. Пиксели в хипе не держатся (раньше каждая
+     * 256x256 занимала int[] на 256 КБ — 2 МБ на интерфейс): нужные куски читаются из картинки по запросу.
+     */
     public static final class Tex {
         public final int id, w, h;
-        final int[] px;
+        final Image src;
         private Image img;
         private float imgK = -1;
 
-        Tex(int[] px, int w, int h) {
-            this.px = px;
-            this.w = w;
-            this.h = h;
+        Tex(Image src) {
+            this.src = src;
+            this.w = src.getWidth();
+            this.h = src.getHeight();
             id = ++texIds;
         }
 
         Image scaled() {
             if (imgK != k) {
-                img = scaleImage(px, w, h, k);
+                img = null;
+                img = k == 1f ? src : scaleImage(region(0, 0, w, h), w, h, k);
                 imgK = k;
             }
             return img;
         }
+
+        /** пиксели ARGB прямоугольника (x, y, rw, rh) */
+        int[] region(int x, int y, int rw, int rh) {
+            int[] p = new int[rw * rh];
+            src.getRGB(p, 0, rw, x, y, rw, rh);
+            return p;
+        }
     }
 
     public static Tex tex(String path) {
-        Image im = img(path);
-        int w = im.getWidth(), h = im.getHeight();
-        int[] p = new int[w * h];
-        im.getRGB(p, 0, w, 0, 0, w, h);
-        return new Tex(p, w, h);
+        return new Tex(img(path));
     }
 
     public static void load() {
-        Image terrain = img("/terrain.png");
-        terrainPx = new int[256 * 256];
-        terrain.getRGB(terrainPx, 0, 256, 0, 0, 256, 256);
-        terrain2D = new Image2D(Image2D.RGBA, terrain);
+        Image ti = img("/terrain.png");
+        terrain = new Tex(ti);
+        terrain2D = new Image2D(Image2D.RGBA, ti);
         gui = tex("/gui/gui.png");
         // хотбар рисуется без смешивания, с alpha-test: полупрозрачное — непрозрачно, прозрачное — дырка
-        int[] at = new int[gui.px.length];
-        for (int i = 0; i < at.length; i++) at[i] = (gui.px[i] >>> 24) > 25 ? gui.px[i] | 0xFF000000 : 0;
-        guiAT = new Tex(at, gui.w, gui.h);
+        int[] at = gui.region(0, 0, gui.w, gui.h);
+        for (int i = 0; i < at.length; i++) at[i] = (at[i] >>> 24) > 25 ? at[i] | 0xFF000000 : 0;
+        guiAT = new Tex(Image.createRGBImage(at, gui.w, gui.h, true));
+        at = null;
         dots = tex("/gui/dots.png");
         icons = tex("/gui/icons.png");
         items = tex("/gui/items.png");
@@ -193,13 +201,14 @@ public final class R {
         Image im = (Image) cache.get(key);
         if (im == null) {
             int[] out = new int[W * H];
+            int[] src = t.region(u, v, uw, vh);
             boolean down = W < uw || H < vh;
             for (int yy = 0; yy < H; yy++) {
-                int sy = v + yy * vh / H;
+                int sy = yy * vh / H;
                 for (int xx = 0; xx < W; xx++) {
                     // уменьшение — усреднение по области (как фильтрация картинок на Android), иначе ближайший тексель
-                    int c = down ? average(t, u + xx * uw / W, sy, u + (xx + 1) * uw / W, v + (yy + 1) * vh / H)
-                            : t.px[sy * t.w + u + xx * uw / W];
+                    int c = down ? average(src, uw, xx * uw / W, sy, (xx + 1) * uw / W, (yy + 1) * vh / H)
+                            : src[sy * uw + xx * uw / W];
                     if (alpha < 255) c = ((((c >>> 24) * alpha) / 255) << 24) | (c & 0xFFFFFF);
                     if (mul < 255) c = (c & 0xFF000000) | ((((c >> 16) & 255) * mul / 255) << 16) | ((((c >> 8) & 255) * mul / 255) << 8) | ((c & 255) * mul / 255);
                     out[yy * W + xx] = c;
@@ -212,15 +221,15 @@ public final class R {
         g.drawImage(im, X, Y, Graphics.TOP | Graphics.LEFT);
     }
 
-    /** Средний цвет текселей [x0,x1) x [y0,y1) с учётом прозрачности. */
-    private static int average(Tex t, int x0, int y0, int x1, int y1) {
+    /** Средний цвет текселей [x0,x1) x [y0,y1) куска шириной sw с учётом прозрачности. */
+    private static int average(int[] px, int sw, int x0, int y0, int x1, int y1) {
         if (x1 <= x0) x1 = x0 + 1;
         if (y1 <= y0) y1 = y0 + 1;
-        if (x1 - x0 == 1 && y1 - y0 == 1) return t.px[y0 * t.w + x0];
+        if (x1 - x0 == 1 && y1 - y0 == 1) return px[y0 * sw + x0];
         int a = 0, r = 0, gg = 0, b = 0, n = 0;
         for (int y = y0; y < y1; y++)
             for (int x = x0; x < x1; x++) {
-                int c = t.px[y * t.w + x], ca = c >>> 24;
+                int c = px[y * sw + x], ca = c >>> 24;
                 a += ca;
                 r += ((c >> 16) & 255) * ca;
                 gg += ((c >> 8) & 255) * ca;
@@ -473,8 +482,9 @@ public final class R {
                 int ic = Item.iconFor(id, aux);
                 int u = (ic & 15) * 16, v = (ic >> 4) * 16;
                 p = new int[N * N];
+                int[] src = items.region(u, v, 16, 16);
                 for (int yy = 0; yy < N; yy++)
-                    for (int xx = 0; xx < N; xx++) p[yy * N + xx] = items.px[(v + yy * 16 / N) * items.w + u + xx * 16 / N];
+                    for (int xx = 0; xx < N; xx++) p[yy * N + xx] = src[(yy * 16 / N) * 16 + xx * 16 / N];
             } else p = blockIcon(id, aux, N);
             for (int i = 0; i < p.length; i++) {
                 int c = p[i];
@@ -516,10 +526,24 @@ public final class R {
         shadow(g, countText(count), x, y, 0xCCCCCC, 2f / k);
     }
 
+    private static final Hashtable tileCache = new Hashtable();
+
+    /** пиксели тайла terrain.png (кэш нескольких последних) */
+    private static int[] tile(int tex) {
+        Integer key = new Integer(tex);
+        int[] t = (int[]) tileCache.get(key);
+        if (t == null) {
+            t = terrain.region((tex & 15) * 16, (tex >> 4) * 16, 16, 16);
+            if (tileCache.size() > 32) tileCache.clear();
+            tileCache.put(key, t);
+        }
+        return t;
+    }
+
     private static int sample(int tex, int u, int v) {
         if (u < 0) u = 0; if (u > 15) u = 15;
         if (v < 0) v = 0; if (v > 15) v = 15;
-        return terrainPx[((tex >> 4) * 16 + v) * 256 + (tex & 15) * 16 + u];
+        return tile(tex & 255)[v * 16 + u];
     }
 
     private static int shade(int c, int k, int tint) {

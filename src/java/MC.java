@@ -276,35 +276,41 @@ public final class MC extends GameCanvas implements Runnable, CommandListener {
 
     /** Направление в меню: джойстик или 2/8/4/6. */
     private static int navDir(int k, int ga) {
-        if (ga == UP || k == KEY_NUM2) return Screen.UP;
-        if (ga == DOWN || k == KEY_NUM8) return Screen.DOWN;
-        if (ga == LEFT || k == KEY_NUM4) return Screen.LEFT;
-        if (ga == RIGHT || k == KEY_NUM6) return Screen.RIGHT;
+        int q = qwerty(k);
+        if (ga == UP || k == KEY_NUM2 || q == 'w' || q == 'i') return Screen.UP;
+        if (ga == DOWN || k == KEY_NUM8 || q == 's' || q == 'k') return Screen.DOWN;
+        if (ga == LEFT || k == KEY_NUM4 || q == 'a' || q == 'j') return Screen.LEFT;
+        if (ga == RIGHT || k == KEY_NUM6 || q == 'd' || q == 'l') return Screen.RIGHT;
         return -1;
     }
 
     private static boolean isOk(int k, int ga) {
-        return ga == FIRE || k == KEY_NUM5 || k == 10 || k == 13;
+        return ga == FIRE || k == KEY_NUM5 || k == 10 || k == 13 || k == ' ';
     }
 
-    /** Раскладка в игре: джойстик — ходьба, центр/3 — прыжок, 2/8/4/6 — взгляд, 5 — копать, 1 — использовать, * — присесть. */
+    /** Русская ЙЦУКЕН -> латинская буква на той же клавише (QWERTY-телефоны шлют символ текущего языка ввода). */
+    private static final String RU = "йцукенгшщзфывапролдячсмить", RU_LAT = "qwertyuiopasdfghjklzxcvbnm";
+
+    /**
+     * QWERTY-клавиатура (Nokia E6, E72, Asha...): код клавиши — её символ. Свести к строчной латинской букве
+     * по месту на клавиатуре (регистр и русская раскладка не важны); не буква — 0.
+     */
+    static int qwerty(int k) {
+        if (k >= 'A' && k <= 'Z') return k + 32;
+        if (k >= 'a' && k <= 'z') return k;
+        if (k >= 0x410 && k <= 0x42F) k += 32;
+        int i = RU.indexOf(k);
+        return i >= 0 ? RU_LAT.charAt(i) : 0;
+    }
+
+    /** Удерживаемые действия по Keys (остальные — разовые, в keyDown). */
+    private static final int[] KEY_ACT = { A_FWD, A_BACK, A_LEFT, A_RIGHT, A_JUMP, A_DESTROY, A_USE, A_LOOKUP, A_LOOKDOWN,
+            A_TURNL, A_TURNR, A_SNEAK, -1, -1, -1, -1, -1 };
+
+    /** Раскладка в игре — Keys (настраивается в Options > Custom > Keys). */
     private static int actionOf(int k, int ga) {
-        switch (k) {
-            case KEY_NUM1: return A_USE;
-            case KEY_NUM2: return A_LOOKUP;
-            case KEY_NUM3: return A_JUMP2;
-            case KEY_NUM4: return A_TURNL;
-            case KEY_NUM5: return A_DESTROY;
-            case KEY_NUM6: return A_TURNR;
-            case KEY_NUM8: return A_LOOKDOWN;
-            case KEY_STAR: return A_SNEAK;
-        }
-        if (ga == UP) return A_FWD;
-        if (ga == DOWN) return A_BACK;
-        if (ga == LEFT) return A_LEFT;
-        if (ga == RIGHT) return A_RIGHT;
-        if (ga == FIRE) return A_JUMP;
-        return -1;
+        int b = Keys.find(k, ga);
+        return b < 0 ? -1 : KEY_ACT[b];
     }
 
     private void releaseKeys() {
@@ -322,6 +328,7 @@ public final class MC extends GameCanvas implements Runnable, CommandListener {
                 return;
             }
         }
+        if (screen != null && screen.keyRaw(k, ga)) return;
         if (screen != null) {
             // Screen::keyPressed: фокус по кнопкам, OK — нажать, софт-клавиши / * — назад
             if (isBackKey(k) || k == KEY_STAR) screen.back();
@@ -330,26 +337,29 @@ public final class MC extends GameCanvas implements Runnable, CommandListener {
             return;
         }
         if (level == null || player == null) return;
-        // Minecraft::tick (клавиши): Menu/«Назад» — пауза
-        if (isBackKey(k)) {
-            setScreen(new PauseScreen());
-            return;
-        }
         Inventory inv = player.inv;
         int n = gui.numSlots - 1;
-        switch (k) {
-            case KEY_NUM7: // Gui::handleKeyPressed: предыдущий / следующий слот (по кругу, как колесо мыши)
+        switch (Keys.find(k, ga)) {
+            case Keys.PREV: // Gui::handleKeyPressed: предыдущий / следующий слот (по кругу, как колесо мыши)
                 gui.selectSlot((inv.selected - 1 + n) % n);
                 return;
-            case KEY_NUM9:
+            case Keys.NEXT:
                 gui.selectSlot((inv.selected + 1) % n);
                 return;
-            case KEY_NUM0: // SCREEN_BLOCKSELECTION
+            case Keys.INV: // SCREEN_BLOCKSELECTION
                 setScreen(new InventoryScreen());
                 return;
-            case KEY_POUND: // KeyboardInput KEY_CRAFT: Player::startCrafting 2x2 (в творческом крафта нет)
+            case Keys.CRAFT: // KeyboardInput KEY_CRAFT: Player::startCrafting 2x2 (в творческом крафта нет)
                 if (!inv.creative && !player.isDead()) setScreen(new CraftScreen(CraftScreen.HAND));
                 return;
+            case Keys.PAUSE:
+                setScreen(new PauseScreen());
+                return;
+            case -1: // Minecraft::tick (клавиши): Menu/«Назад» — пауза (софт-клавиши — если не назначены)
+                if (isBackKey(k)) {
+                    setScreen(new PauseScreen());
+                    return;
+                }
         }
         int a = actionOf(k, ga);
         if (a < 0 || act[a]) return;
@@ -420,6 +430,9 @@ public final class MC extends GameCanvas implements Runnable, CommandListener {
             gui.layout(W, H);
             Lang.load();
             Sound.init();
+            Runtime rt = Runtime.getRuntime();
+            rt.gc();
+            Log.i("BOOT heap " + ((rt.totalMemory() - rt.freeMemory()) >> 10) + "K/" + (rt.totalMemory() >> 10) + "K");
             // Nokia Asha: Multipoint Touch API (класс грузится по имени — на других телефонах его нет)
             try {
                 Class.forName("com.nokia.mid.ui.multipointtouch.MultipointTouch");
@@ -575,7 +588,7 @@ public final class MC extends GameCanvas implements Runnable, CommandListener {
         long g1 = System.currentTimeMillis();
         drawLoading(g, "Saving chunks", 100);
         if (Storage.init()) Storage.saveAll(l, p);
-        Log.i("GEN " + (g1 - g0) + " ms, save " + (System.currentTimeMillis() - g1) + " ms");
+        Log.i("GEN " + (g1 - g0) + " ms, save " + (System.currentTimeMillis() - g1) + " ms, " + memInfo(l));
         startGame(l, p);
     }
 
@@ -600,6 +613,15 @@ public final class MC extends GameCanvas implements Runnable, CommandListener {
     }
 
     long loadMs;
+
+    /** занятый хип и размер слоёв мира (КБ) — для замеров памяти */
+    static String memInfo(Level l) {
+        Runtime r = Runtime.getRuntime();
+        r.gc();
+        return "heap " + ((r.totalMemory() - r.freeMemory()) >> 10) + "K/" + (r.totalMemory() >> 10) + "K, world blocks "
+                + (l.blocks.bytes() >> 10) + "K data " + (l.data.bytes() >> 10) + "K sky " + (l.sky.bytes() >> 10) + "K blk "
+                + (l.blk.bytes() >> 10) + "K";
+    }
 
     // ---- клиент сетевой игры (ClientSideNetworkHandler -> Minecraft) ----
 
@@ -739,6 +761,7 @@ public final class MC extends GameCanvas implements Runnable, CommandListener {
         if (er == null) er = new EntityRenderer(lr);
         particles.setLevel(l, lr);
         applyOptions();
+        lr.updateRange(p.x, p.z);
         // построить ближние секции до входа в игру
         Graphics g = getGraphics();
         int total = lr.pendingCount();
@@ -749,7 +772,8 @@ public final class MC extends GameCanvas implements Runnable, CommandListener {
             drawLoading(g, "Preparing", -1);
             if (done > total * 3 / 4) break;
         }
-        Log.i("LOAD read " + loadMs + " ms, prepare " + (System.currentTimeMillis() - t0) + " ms, left " + lr.pendingCount() + "/" + total);
+        Log.i("LOAD read " + loadMs + " ms, prepare " + (System.currentTimeMillis() - t0) + " ms, left " + lr.pendingCount() + "/" + total
+                + ", " + memInfo(l));
         loadMs = 0;
         setScreen(null);
         if (p.loadSleeping) {
@@ -772,6 +796,20 @@ public final class MC extends GameCanvas implements Runnable, CommandListener {
         }
         if (sc == null && w == null) return;
         if (w != null) loadWorld(w);
+        // отладка: mcj.pos=x,y,z,yaw,pitch — поставить игрока (осмотр места с багом)
+        String ps = System.getProperty("mcj.pos");
+        if (level != null && ps != null) {
+            float[] v = new float[5];
+            for (int i = 0, p = 0; i < 5 && p <= ps.length(); i++) {
+                int e = ps.indexOf(',', p);
+                if (e < 0) e = ps.length();
+                if (e > p) v[i] = Float.parseFloat(ps.substring(p, e).trim());
+                p = e + 1;
+            }
+            player.setPos(v[0], v[1], v[2]);
+            player.yRot = player.yRotO = v[3];
+            player.xRot = player.xRotO = v[4];
+        }
         if (level != null && System.getProperty("mcj.time") != null) {
             // отладка: время суток (тики от начала дня)
             level.time = level.time - level.time % Level.TICKS_PER_DAY + Integer.parseInt(System.getProperty("mcj.time"));
@@ -2093,7 +2131,8 @@ public final class MC extends GameCanvas implements Runnable, CommandListener {
     private float camX, camY, camZ, camYaw, camPitch, camFov = 70, camThird;
 
     /** PlayerRenderer::renderName: имя над головой игрока сети (проекция на экран, видно сквозь стены как в 0.6.1).
-     *  Только при adventureSettings.showNameTags — в обычной игре релиза его никто не включает, ников нет. */
+     *  В релизе 0.6.1 — только при adventureSettings.showNameTags (его никто не включает); ники как в 0.6.2 Beta/0.7.0
+     *  включает флажок Custom «Show name tags». */
     private void renderNames(Graphics g) {
         java.util.Vector v = level.entities;
         float t = (float) Math.tan(camFov * Mth.DEG / 2), aspect = (float) W / H;
@@ -2122,7 +2161,7 @@ public final class MC extends GameCanvas implements Runnable, CommandListener {
     }
 
     private void renderHud(Graphics g) {
-        if (level.showNameTags) renderNames(g);
+        if (level.showNameTags || Options.nameTags) renderNames(g);
         gui.render(g, partial);
         // TouchInputHolder::updateFeedbackProgressAlpha: кольцо проявляется за 0.4 с, при копании — до 1, потом гаснет
         boolean wt = worldTouch();

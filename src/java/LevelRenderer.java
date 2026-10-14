@@ -9,8 +9,10 @@ import javax.microedition.m3g.*;
  * - главная цена — разбор вершин драйвером GLES 1.x на CPU, поэтому меш столбца делится по направлению граней
  *   и части, повёрнутые от камеры, драйверу не отдаются (их всё равно отбросило бы отсечение граней);
  * - блокировка ядра M3G в JL-Mod пустая: создание объектов в потоке игры и финализация мусора в потоке M3G
- *   роняют процесс. Поэтому M3G-объекты мира не выбрасываются: части мешей живут в пуле по классам ёмкости
- *   (лишние вершины — вырожденные квады), материалы и узлы общие для всех миров.
+ *   роняют процесс. Поэтому в J2ME Loader M3G-объекты мира не выбрасываются: части мешей живут в пуле по классам
+ *   ёмкости (лишние вершины — вырожденные квады), материалы и узлы общие для всех миров.
+ * Память (2026-10-14, жалобы с E75/Asha: хип 4..16 МБ): секции и меши держатся только для столбцов в пределах
+ * дальности прорисовки, квады секций — в сжатом виде без цвета (SecBuf), цвет считается при склейке.
  * Твёрдый меш = слои OPAQUE и ALPHATEST оригинала (оба с отсечением граней, второй с альфа-тестом — рисуются одним
  * проходом с альфа-тестом); полупрозрачный (вода, лёд) — после сущностей и частиц, от дальних к ближним.
  */
@@ -21,19 +23,15 @@ public final class LevelRenderer {
     static final int[] MESH = { 0, 0, 1 };
     /** группа = столбец чанков 16x16 */
     static final int GS = 0, GW = 16 >> GS, NG = GW * GW, GB = 16 << GS;
+    /** вершин в одной части меша (меньше — меньше временные буферы склейки) */
+    static final int PART_MAX = 8192;
 
     final Level level;
-    /** сырые массивы секций (позиции относительно секции, 1/16 блока) */
-    final short[][][] sPos = new short[NM][NS][];
-    final byte[][][] sCol = new byte[NM][NS][];
-    final short[][][] sUv = new short[NM][NS][];
+    /** сжатые квады секций (SecBuf): вершины, v вершин, квады */
+    final int[][][] sP = new int[NM][NS][];
+    final byte[][][] sLv = new byte[NM][NS][];
+    final int[][][] sQ = new int[NM][NS][];
     final int[][] sVerts = new int[NM][NS];
-    /** по квадам секций: параметры цвета (MeshBuilder.qLight/qTint) для пересчёта при смене времени суток */
-    final short[][][] sQl = new short[NM][NS][];
-    final int[][][] sQt = new int[NM][NS][];
-    /** секции, которым нужно только пересчитать цвета (сменился skyDarken) */
-    final boolean[] recolor = new boolean[NS];
-    int recolorCount;
     /** группы, которые надо склеить сразу, не дожидаясь остальных секций столбца (правки рядом с игроком) */
     final boolean[] grpUrgent = new boolean[NG];
     /** части мешей групп (по направлению граней и лимиту вершин) */
@@ -43,6 +41,9 @@ public final class LevelRenderer {
     private final int[] blendSlot = new int[NG];
     final boolean[] grpDirty = new boolean[NG];
     final int[] grpY0 = new int[NG], grpY1 = new int[NG];
+    /** столбцы в пределах дальности: только для них строятся секции и меши */
+    final boolean[] inRange = new boolean[NG];
+    private int rangeX = Integer.MIN_VALUE, rangeZ, rangeDist = -1;
 
     static int group(int sx, int sz) {
         return (sx >> GS) + (sz >> GS) * GW;
@@ -69,6 +70,10 @@ public final class LevelRenderer {
     static final Transform identity = new Transform();
     /** пул частей: [класс ёмкости * 2 + (байтовые позиции ? 1 : 0)] */
     private static java.util.Vector[] pool;
+    /** вершин в пуле; вне J2ME Loader лишнее отдаётся сборщику мусора */
+    private static int pooledVerts;
+    private static final int POOL_LIMIT = 48 * 1024;
+    private static boolean keepPool;
     /** классы ёмкости частей (кратны 4, шаг ~1/8) */
     private static int[] CAPS;
     private static LevelRenderer current;
@@ -84,7 +89,7 @@ public final class LevelRenderer {
         float plane;
     }
 
-    final MeshBuilder[] mb = { new MeshBuilder(), new MeshBuilder() };
+    final SecBuf[] mb = { new SecBuf(), new SecBuf() };
 
     public int renderDist = 80;
     public int lastDrawn;
@@ -110,10 +115,10 @@ public final class LevelRenderer {
         if (current != null && current != this) current.retireAll();
         current = this;
         for (int g = 0; g < NG; g++) blendSlot[g] = -1;
-        allDirty();
     }
 
     private static void initShared(Image2D terrain) {
+        keepPool = BtNet.onLoader();
         terrainTex = new Texture2D(terrain);
         terrainTex.setFiltering(Texture2D.FILTER_BASE_LEVEL, Texture2D.FILTER_NEAREST);
         terrainTex.setWrapping(Texture2D.WRAP_CLAMP, Texture2D.WRAP_CLAMP);
@@ -170,12 +175,12 @@ public final class LevelRenderer {
         }
         int[] caps = new int[128];
         int n = 0, c = 16;
-        while (c < MeshBuilder.MAX_VERTS) {
+        while (c < PART_MAX) {
             caps[n++] = c;
             int next = (c + c / 8 + 3) & ~3;
             c = next < c + 16 ? c + 16 : next;
         }
-        caps[n++] = MeshBuilder.MAX_VERTS;
+        caps[n++] = PART_MAX;
         CAPS = new int[n];
         System.arraycopy(caps, 0, CAPS, 0, n);
         pool = new java.util.Vector[n * 2];
@@ -200,61 +205,83 @@ public final class LevelRenderer {
                 p.on = false;
                 p.mesh.setRenderingEnable(false);
             }
+            // на телефонах лишние части — сборщику мусора (в J2ME Loader финализация M3G роняет процесс)
+            if (!keepPool && pooledVerts + CAPS[p.cls] > POOL_LIMIT) continue;
+            pooledVerts += CAPS[p.cls];
             pool[p.cls * 2 + (p.bytes ? 1 : 0)].addElement(p);
         }
     }
 
     public void allDirty() {
+        dirtyCount = 0;
         for (int i = 0; i < NS; i++) {
-            dirty[i] = true;
-            if (recolor[i]) {
-                recolor[i] = false;
-                recolorCount--;
-            }
+            dirty[i] = inRange[i & 255];
+            if (dirty[i]) dirtyCount++;
         }
-        dirtyCount = NS;
     }
 
     /**
-     * Сменилась темнота неба: оригинал перестраивает все освещённые небом чанки (skyColorChanged), здесь меняются
-     * только цвета вершин — геометрия от времени суток не зависит, результат тот же.
+     * Столбцы в пределах дальности прорисовки (с запасом и гистерезисом): вошедшие строятся, ушедшие забываются
+     * вместе с секциями и мешами — так память рендера не зависит от размера мира.
      */
-    public void skyChanged() {
-        for (int i = 0; i < NS; i++) {
-            if (dirty[i] || recolor[i] || !built[i]) continue;
-            recolor[i] = true;
-            recolorCount++;
+    public void updateRange(float cx, float cz) {
+        int bx = Mth.floor(cx), bz = Mth.floor(cz);
+        if (rangeDist == renderDist && Math.abs(bx - rangeX) < 4 && Math.abs(bz - rangeZ) < 4) return;
+        rangeX = bx;
+        rangeZ = bz;
+        rangeDist = renderDist;
+        int enter = renderDist + 12, leave = renderDist + 28;
+        for (int g = 0; g < NG; g++) {
+            int x0 = (g % GW) * GB, z0 = (g / GW) * GB;
+            int dx = Math.max(0, Math.max(x0 - bx, bx - x0 - GB)), dz = Math.max(0, Math.max(z0 - bz, bz - z0 - GB));
+            int d2 = dx * dx + dz * dz;
+            if (!inRange[g] && d2 <= enter * enter) {
+                inRange[g] = true;
+                for (int sy = 0; sy < SY; sy++) markDirty(g & 15, sy, g >> 4);
+            } else if (inRange[g] && d2 > leave * leave) drop(g);
         }
     }
 
-    /** Пересчитать цвета вершин секции по сохранённым параметрам квадов. */
-    private void recolorSection(int i) {
-        recolor[i] = false;
-        recolorCount--;
+    /** Забыть столбец: меши в пул, секции — сборщику мусора. */
+    private void drop(int g) {
+        inRange[g] = false;
         for (int k = 0; k < NM; k++) {
-            int v = sVerts[k][i];
-            if (v == 0) continue;
-            byte[] c = sCol[k][i];
-            short[] ql = sQl[k][i];
-            int[] qt = sQt[k][i];
-            for (int q = 0, j = 0; q < v >> 2; q++) {
-                int l = ql[q], t = qt[q];
-                int col = rgba(BR[level.levelOf(l & 255)], (l >> 8) & 255, t & 0xFFFFFF, t >>> 24);
-                byte r = (byte) (col >> 16), g = (byte) (col >> 8), b = (byte) col, a = (byte) (col >>> 24);
-                for (int n = 0; n < 4; n++, j += 4) {
-                    c[j] = r;
-                    c[j + 1] = g;
-                    c[j + 2] = b;
-                    c[j + 3] = a;
-                }
+            retire(k, gpart[k][g]);
+            gpart[k][g] = null;
+            shown[k][g] = false;
+        }
+        blendSlot[g] = -1;
+        grpDirty[g] = false;
+        grpUrgent[g] = false;
+        for (int sy = 0; sy < SY; sy++) {
+            int i = g | (sy << 8);
+            if (dirty[i]) {
+                dirty[i] = false;
+                dirtyCount--;
+            }
+            built[i] = false;
+            sChest[i] = null;
+            for (int k = 0; k < NM; k++) {
+                sVerts[k][i] = 0;
+                sP[k][i] = null;
+                sLv[k][i] = null;
+                sQ[k][i] = null;
             }
         }
-        grpDirty[group(i & 15, (i >> 4) & 15)] = true;
+    }
+
+    /**
+     * Сменилась темнота неба: оригинал перестраивает все освещённые небом чанки (skyColorChanged), здесь столбцы
+     * только склеиваются заново — цвет считается при склейке, геометрия от времени суток не зависит.
+     */
+    public void skyChanged() {
+        for (int g = 0; g < NG; g++) if (gpart[0][g] != null || gpart[1][g] != null) grpDirty[g] = true;
     }
 
     private void markDirty(int sx, int sy, int sz) {
         if (sx < 0 || sy < 0 || sz < 0 || sx >= SX || sy >= SY || sz >= SZ) return;
         int i = sx + (sz << 4) + (sy << 8);
+        if (!inRange[i & 255]) return;
         if (!dirty[i]) {
             dirty[i] = true;
             dirtyCount++;
@@ -279,6 +306,7 @@ public final class LevelRenderer {
     private void markUrgent(int sx, int sy, int sz) {
         if (sx < 0 || sy < 0 || sz < 0 || sx >= SX || sy >= SY || sz >= SZ) return;
         int i = sx + (sz << 4) + (sy << 8);
+        if (!inRange[i & 255]) return;
         markDirty(sx, sy, sz);
         for (int k = 0; k < urgentCount; k++) if (urgent[k] == i) return;
         if (urgentCount < urgent.length) urgent[urgentCount++] = i;
@@ -287,6 +315,7 @@ public final class LevelRenderer {
     /** Перестроить часть грязных секций, ближайшие к камере — первыми. */
     public void updateDirty(float cx, float cy, float cz, int budgetMs) {
         long start = System.currentTimeMillis();
+        updateRange(cx, cz);
         while (urgentCount > 0) {
             int i = urgent[--urgentCount];
             if (dirty[i]) {
@@ -294,22 +323,21 @@ public final class LevelRenderer {
                 grpUrgent[group(i & 15, (i >> 4) & 15)] = true;
             }
         }
-        if (dirtyCount <= 0 && recolorCount <= 0) {
+        if (dirtyCount <= 0) {
             combineDirty(start, budgetMs);
             return;
         }
-        int pcx = Mth.floor(cx) >> 4, pcy = Mth.floor(cy) >> 4, pcz = Mth.floor(cz) >> 4;
-        int maxR = renderDist / 16 + 1;
-        for (int r = 0; r <= maxR + 8; r++) {
+        int pcx = Mth.floor(cx) >> 4, pcz = Mth.floor(cz) >> 4;
+        int maxR = renderDist / 16 + 3;
+        for (int r = 0; r <= maxR; r++) {
             for (int sy = 0; sy < SY; sy++)
                 for (int sx = pcx - r; sx <= pcx + r; sx++)
                     for (int sz = pcz - r; sz <= pcz + r; sz++) {
                         if (Math.max(Math.abs(sx - pcx), Math.abs(sz - pcz)) != r) continue;
                         if (sx < 0 || sz < 0 || sx >= SX || sz >= SZ) continue;
                         int i = sx + (sz << 4) + (sy << 8);
-                        if (dirty[i]) rebuild(i);
-                        else if (recolor[i]) recolorSection(i);
-                        else continue;
+                        if (!dirty[i]) continue;
+                        rebuild(i);
                         if (System.currentTimeMillis() - start > budgetMs) {
                             combineDirty(start, budgetMs);
                             return;
@@ -322,10 +350,6 @@ public final class LevelRenderer {
     private void rebuild(int i) {
         dirty[i] = false;
         dirtyCount--;
-        if (recolor[i]) {
-            recolor[i] = false;
-            recolorCount--;
-        }
         built[i] = true;
         int sx = i & 15, sz = (i >> 4) & 15, sy = i >> 8;
         for (int k = 0; k < NM; k++) mb[k].clear();
@@ -339,29 +363,31 @@ public final class LevelRenderer {
         }
         if (Prof.on) { Prof.add(Prof.M_TESS, t0); Prof.rebuilds++; }
         for (int k = 0; k < NM; k++) {
-            MeshBuilder m = mb[k];
+            SecBuf m = mb[k];
             int v = m.verts;
             sVerts[k][i] = v;
             if (v == 0) {
-                sPos[k][i] = null; sCol[k][i] = null; sUv[k][i] = null;
-                sQl[k][i] = null; sQt[k][i] = null;
+                sP[k][i] = null; sLv[k][i] = null; sQ[k][i] = null;
             } else {
-                short[] ql = new short[v >> 2];
-                System.arraycopy(m.qLight, 0, ql, 0, v >> 2);
-                int[] qt = new int[v >> 2];
-                System.arraycopy(m.qTint, 0, qt, 0, v >> 2);
-                sQl[k][i] = ql; sQt[k][i] = qt;
-                short[] p = new short[v * 3];
-                System.arraycopy(m.pos, 0, p, 0, v * 3);
-                byte[] c = new byte[v * 4];
-                System.arraycopy(m.col, 0, c, 0, v * 4);
-                short[] u = new short[v * 2];
-                System.arraycopy(m.uv, 0, u, 0, v * 2);
-                sPos[k][i] = p; sCol[k][i] = c; sUv[k][i] = u;
+                int[] p = new int[v];
+                System.arraycopy(m.p, 0, p, 0, v);
+                byte[] lv = new byte[v];
+                System.arraycopy(m.lv, 0, lv, 0, v);
+                int[] q = new int[v >> 2];
+                System.arraycopy(m.q, 0, q, 0, v >> 2);
+                sP[k][i] = p; sLv[k][i] = lv; sQ[k][i] = q;
             }
         }
         grpDirty[group(sx, sz)] = true;
     }
+
+    // буферы склейки одной части: позиции в 1/16 от угла группы, цвета, развёртка
+    private static short[] cPos;
+    private static byte[] cCol;
+    private static short[] cUv;
+    private static byte[] bPos;
+    private int cVerts;
+    private final int[] lightRgb = new int[256 * 4];
 
     /**
      * Склеить секции группы в меши: квады раскладываются по направлению граней, каждая часть берётся из пула.
@@ -370,38 +396,61 @@ public final class LevelRenderer {
      */
     private void combine(int g) {
         grpDirty[g] = false;
-        int gx = (g % GW) << GS, gz = (g / GW) << GS, gc = 1 << GS;
+        if (cPos == null) {
+            cPos = new short[PART_MAX * 3];
+            cCol = new byte[PART_MAX * 4];
+            cUv = new short[PART_MAX * 2];
+            bPos = new byte[PART_MAX * 3];
+        }
+        // яркость по коду света при текущем skyDarken и затенению — один раз на склейку
+        for (int code = 0; code < 256; code++)
+            for (int s = 0; s < 4; s++) lightRgb[(code << 2) | s] = BR[level.levelOf(code)] * SecBuf.SHADES[s] / 255;
+        int gx = (g % GW) << GS, gz = (g / GW) << GS;
         int y0 = 99, y1 = -1;
         for (int k = 0; k < NM; k++) {
             retire(k, gpart[k][g]);
             gpart[k][g] = null;
             shown[k][g] = false;
             if (k == 1) blendSlot[g] = -1;
-            for (int b = 0; b < 7; b++) bucket[b].clear();
-            for (int sy = 0; sy < SY; sy++)
-                for (int q = 0; q < gc * gc; q++) {
-                    int i = (gx + q % gc) | ((gz + q / gc) << 4) | (sy << 8);
+            nParts = 0;
+            for (int sy = 0; sy < SY; sy++) {
+                if (sVerts[k][g | (sy << 8)] == 0) continue;
+                if (sy < y0) y0 = sy;
+                if (sy > y1) y1 = sy;
+            }
+            for (int b = 0; b < 7; b++) {
+                cVerts = 0;
+                for (int sy = 0; sy < SY; sy++) {
+                    int i = g | (sy << 8);
                     int v = sVerts[k][i];
                     if (v == 0) continue;
-                    if (sy < y0) y0 = sy;
-                    if (sy > y1) y1 = sy;
-                    sortQuads(sPos[k][i], sCol[k][i], sUv[k][i], v, (q % gc) * 256, sy * 256, (q / gc) * 256);
-                }
-            nParts = 0;
-            for (int b = 0; b < 7; b++) {
-                MeshBuilder m = bucket[b];
-                for (int from = 0; from < m.verts; from += MeshBuilder.MAX_VERTS) {
-                    int n = Math.min(m.verts - from, MeshBuilder.MAX_VERTS);
-                    Part p = makePart(m, from, n, k, gx, gz);
-                    p.dir = b;
-                    p.plane = b < 6 ? plane(m, from, n, b, gx, gz) : 0;
-                    if (nParts == parts.length) {
-                        Part[] np = new Part[nParts * 2];
-                        System.arraycopy(parts, 0, np, 0, nParts);
-                        parts = np;
+                    int[] p = sP[k][i], q = sQ[k][i];
+                    byte[] lv = sLv[k][i];
+                    int dy = sy * 256;
+                    for (int qi = 0, n = v >> 2; qi < n; qi++) {
+                        int info = q[qi];
+                        if (((info >> 10) & 7) != b) continue;
+                        if (cVerts + 4 > PART_MAX) flushPart(k, b, gx, gz);
+                        int lt = lightRgb[((info & 255) << 2) | ((info >> 8) & 3)], tint = SecBuf.tints[(info >>> 21) & 255];
+                        int tile = (info >>> 13) & 255, tu = (tile & 15) << 4, tv = tile & 0xF0;
+                        byte cr = (byte) (((tint >> 16) & 255) * lt / 255), cg = (byte) (((tint >> 8) & 255) * lt / 255);
+                        byte cb = (byte) ((tint & 255) * lt / 255), ca = (byte) (tint >>> 24);
+                        for (int j = qi << 2, e = j + 4; j < e; j++) {
+                            int pp = p[j], d = cVerts;
+                            cPos[d * 3] = (short) SecBuf.px(pp);
+                            cPos[d * 3 + 1] = (short) (SecBuf.py(pp) + dy);
+                            cPos[d * 3 + 2] = (short) SecBuf.pz(pp);
+                            cCol[d * 4] = cr;
+                            cCol[d * 4 + 1] = cg;
+                            cCol[d * 4 + 2] = cb;
+                            cCol[d * 4 + 3] = ca;
+                            cUv[d * 2] = (short) (tu + (pp >>> 27));
+                            cUv[d * 2 + 1] = (short) (tv + lv[j]);
+                            cVerts = d + 1;
+                        }
                     }
-                    parts[nParts++] = p;
                 }
+                if (cVerts > 0) flushPart(k, b, gx, gz);
             }
             if (nParts == 0) continue;
             Part[] ps = new Part[nParts];
@@ -416,50 +465,32 @@ public final class LevelRenderer {
         grpY1[g] = y1 >= 0 ? y1 * 16 + 16 : 0;
     }
 
-    private final MeshBuilder[] bucket = new MeshBuilder[7];
-    {
-        for (int i = 0; i < 7; i++) bucket[i] = new MeshBuilder();
+    private void flushPart(int k, int b, int gx, int gz) {
+        int n = cVerts;
+        cVerts = 0;
+        Part p = makePart(n, k, gx, gz);
+        p.dir = b;
+        p.plane = b < 6 ? plane(n, b, gx, gz) : 0;
+        if (nParts == parts.length) {
+            Part[] np = new Part[nParts * 2];
+            System.arraycopy(parts, 0, np, 0, nParts);
+            parts = np;
+        }
+        parts[nParts++] = p;
     }
+
     private Part[] parts = new Part[16];
     private int nParts;
-    private static byte[] bPos = new byte[0];
-    private static short[] tPos = new short[0];
-    private static byte[] tCol = new byte[0];
-    private static short[] tUv = new short[0];
     private final float[] bias = new float[3];
     private final int[] partUnit = new int[3], partMin = new int[3];
 
-    /**
-     * Разложить квады секции по направлению граней (координаты — 1/16 блока от угла группы). Грань, повёрнутая
-     * от камеры, не рисуется (отсечение граней), так что такие части столбца можно не отдавать драйверу вовсе.
-     */
-    private void sortQuads(short[] pos, byte[] col, short[] uv, int verts, int dx, int dy, int dz) {
-        for (int q = 0; q < verts; q += 4) {
-            int j = q * 3;
-            int b = 6;
-            int x0 = pos[j], y0 = pos[j + 1], z0 = pos[j + 2];
-            boolean sx = pos[j + 3] == x0 && pos[j + 6] == x0 && pos[j + 9] == x0;
-            boolean sy = pos[j + 4] == y0 && pos[j + 7] == y0 && pos[j + 10] == y0;
-            boolean sz = pos[j + 5] == z0 && pos[j + 8] == z0 && pos[j + 11] == z0;
-            if (sx || sy || sz) {
-                // нормаль (v1 - v0) x (v2 - v0): у полосы (a b d c) — наружу для лицевой стороны
-                int ax = pos[j + 3] - x0, ay = pos[j + 4] - y0, az = pos[j + 5] - z0;
-                int bx = pos[j + 6] - x0, by = pos[j + 7] - y0, bz = pos[j + 8] - z0;
-                if (sx) b = (ay * bz - az * by) > 0 ? 0 : 1;
-                else if (sy) b = (az * bx - ax * bz) > 0 ? 2 : 3;
-                else b = (ax * by - ay * bx) > 0 ? 4 : 5;
-            }
-            bucket[b].append(pos, col, uv, q, 4, dx, dy, dz);
-        }
-    }
-
     /** Крайняя плоскость граней направления b (в блоках мира): «+» — наименьшая, «-» — наибольшая. */
-    private static float plane(MeshBuilder m, int from, int n, int b, int gx, int gz) {
+    private static float plane(int n, int b, int gx, int gz) {
         int axis = b >> 1;
         boolean neg = (b & 1) != 0;
         int best = neg ? Integer.MIN_VALUE : Integer.MAX_VALUE;
-        short[] p = m.pos;
-        for (int j = from * 3 + axis, e = (from + n) * 3; j < e; j += 3) {
+        short[] p = cPos;
+        for (int j = axis, e = n * 3; j < e; j += 3) {
             int c = p[j];
             if (neg ? c > best : c < best) best = c;
         }
@@ -478,16 +509,16 @@ public final class LevelRenderer {
     }
 
     /**
-     * Часть из вершин [from, from+n) корзины: из пула (или новая) класса ёмкости не меньше n; хвост до ёмкости
+     * Часть из n вершин буферов склейки: из пула (или новая) класса ёмкости не меньше n; хвост до ёмкости
      * заполняется копиями последней вершины — вырожденные квады нулевой площади.
      */
-    private Part makePart(MeshBuilder m, int from, int n, int k, int gx, int gz) {
-        short[] p = m.pos;
+    private Part makePart(int n, int k, int gx, int gz) {
+        short[] p = cPos;
         int[] unit = partUnit, min = partMin;
         boolean bytes = true;
         for (int a = 0; a < 3; a++) {
             int or = 0, lo = Integer.MAX_VALUE, hi = Integer.MIN_VALUE;
-            for (int j = from * 3 + a, e = (from + n) * 3; j < e; j += 3) {
+            for (int j = a, e = n * 3; j < e; j += 3) {
                 int c = p[j];
                 or |= c;
                 if (c < lo) lo = c;
@@ -504,6 +535,7 @@ public final class LevelRenderer {
         if (pl.size() > 0) {
             part = (Part) pl.elementAt(pl.size() - 1);
             pl.removeElementAt(pl.size() - 1);
+            pooledVerts -= cap;
         } else {
             part = new Part();
             part.cls = cls;
@@ -519,37 +551,30 @@ public final class LevelRenderer {
             part.mesh.setRenderingEnable(false);
         }
         part.verts = n;
-        int last = from + n - 1;
+        int last = n - 1;
         if (bytes) {
-            if (bPos.length < cap * 3) bPos = new byte[CAPS[CAPS.length - 1] * 3];
             for (int a = 0; a < 3; a++) {
                 int u = unit[a], o = min[a] + 128;
-                for (int j = from * 3 + a, d = a, e = (from + n) * 3; j < e; j += 3, d += 3) bPos[d] = (byte) (p[j] / u - o);
+                for (int j = a, e = n * 3; j < e; j += 3) bPos[j] = (byte) (p[j] / u - o);
                 byte pad = (byte) (p[last * 3 + a] / u - o);
                 for (int d = n * 3 + a; d < cap * 3; d += 3) bPos[d] = pad;
                 bias[a] = o;
             }
             part.pa.set(0, cap, bPos);
         } else {
-            if (tPos.length < cap * 3) tPos = new short[CAPS[CAPS.length - 1] * 3];
-            System.arraycopy(p, from * 3, tPos, 0, n * 3);
             for (int d = n * 3; d < cap * 3; d += 3) {
-                tPos[d] = p[last * 3];
-                tPos[d + 1] = p[last * 3 + 1];
-                tPos[d + 2] = p[last * 3 + 2];
+                p[d] = p[last * 3];
+                p[d + 1] = p[last * 3 + 1];
+                p[d + 2] = p[last * 3 + 2];
             }
             unit[0] = unit[1] = unit[2] = 1;
             bias[0] = bias[1] = bias[2] = 0;
-            part.pa.set(0, cap, tPos);
+            part.pa.set(0, cap, p);
         }
-        if (tCol.length < cap * 4) tCol = new byte[CAPS[CAPS.length - 1] * 4];
-        System.arraycopy(m.col, from * 4, tCol, 0, n * 4);
-        for (int d = n * 4; d < cap * 4; d++) tCol[d] = 0;
-        part.ca.set(0, cap, tCol);
-        if (tUv.length < cap * 2) tUv = new short[CAPS[CAPS.length - 1] * 2];
-        System.arraycopy(m.uv, from * 2, tUv, 0, n * 2);
-        for (int d = n * 2; d < cap * 2; d++) tUv[d] = 0;
-        part.ta.set(0, cap, tUv);
+        for (int d = n * 4; d < cap * 4; d++) cCol[d] = 0;
+        part.ca.set(0, cap, cCol);
+        for (int d = n * 2; d < cap * 2; d++) cUv[d] = 0;
+        part.ta.set(0, cap, cUv);
         part.vb.setPositions(part.pa, 1f, bias);
         Appearance ap = k == 0 ? meshApp[0] : blendApp[0];
         if (part.mesh.getAppearance(0) != ap) part.mesh.setAppearance(0, ap);
@@ -567,7 +592,7 @@ public final class LevelRenderer {
         int c = g; // GS = 0: группа = столбец
         for (int sy = 0; sy < SY; sy++) {
             int i = c | (sy << 8);
-            if (dirty[i] || recolor[i]) return false;
+            if (dirty[i]) return false;
         }
         return true;
     }
@@ -592,24 +617,24 @@ public final class LevelRenderer {
     // ---- геометрия ----
 
     private int ox, oy, oz;
-    private MeshBuilder cur;
+    private SecBuf cur;
 
     private void tessellateSection(int x0, int y0, int z0) {
         ox = x0; oy = y0; oz = z0;
         Level l = level;
         int c = (x0 >> 4) | ((z0 >> 4) << 4);
-        byte[] b = l.blocks[c];
+        // секция из четырёх пустых кусков слоя блоков — пропуск без обхода
         boolean any = false;
-        for (int x = 0; x < 16 && !any; x++)
-            for (int z = 0; z < 16 && !any; z++) {
-                int base = (x << 11) | (z << 7) | y0;
-                for (int y = 0; y < 16; y++) if (b[base + y] != 0) { any = true; break; }
-            }
+        for (int py = y0 >> 2; py < (y0 >> 2) + 4 && !any; py++) {
+            int k = (c << 5) | py;
+            if (!l.blocks.uniform(k) || l.blocks.uniformValue(k) != 0) any = true;
+        }
         if (!any) return;
+        Pal b = l.blocks;
         for (int y = y0; y < y0 + 16; y++)
             for (int z = z0; z < z0 + 16; z++)
                 for (int x = x0; x < x0 + 16; x++) {
-                    int id = b[((x & 15) << 11) | ((z & 15) << 7) | y] & 255;
+                    int id = b.get(c, ((x & 15) << 11) | ((z & 15) << 7) | y);
                     if (id == 0) continue;
                     tessellate(id, x, y, z);
                 }
@@ -716,13 +741,12 @@ public final class LevelRenderer {
     static final int FULL = 0xFF;
 
     /**
-     * Цвет грани по коду света, затенению и оттенку; параметры запоминаются за следующими квадами меша
-     * (MeshBuilder.qLight/qTint), чтобы при смене времени суток пересчитать цвета без перестройки геометрии.
+     * Параметры цвета следующих квадов секции (код света, затенение, оттенок): сам цвет считается при склейке
+     * столбца (combine), поэтому смена времени суток не требует перестройки геометрии.
      */
     private int color(int code, int shade, int tint, int alpha) {
-        cur.curLight = (short) ((shade << 8) | code);
-        cur.curTint = (alpha << 24) | (tint & 0xFFFFFF);
-        return rgba(BR[level.levelOf(code)], shade, tint, alpha);
+        cur.curInfo = (code & 255) | (SecBuf.shadeIndex(shade) << 8) | (SecBuf.tintIndex((alpha << 24) | (tint & 0xFFFFFF)) << 21);
+        return 0;
     }
 
     static int rgba(int br, int shade, int tint, int alpha) {
@@ -764,7 +788,9 @@ public final class LevelRenderer {
         int bx = (x - ox) * 16, by = (y - oy) * 16, bz = (z - oz) * 16;
         int tu = (tex & 15) * 16, tv = (tex >> 4) * 16;
         int X0 = bx + x0, X1 = bx + x1, Y0 = by + y0, Y1 = by + y1, Z0 = bz + z0, Z1 = bz + z1;
-        MeshBuilder m = cur;
+        SecBuf m = cur;
+        // TileRenderer::xFlipTexture: развёртка зеркально по u
+        m.flipTu = flipU ? tu : -1;
         switch (f) {
             case 1:
                 m.quad(X0, Y1, Z0, tu + x0, tv + z0, col,
@@ -803,10 +829,7 @@ public final class LevelRenderer {
                         X1, Y1, Z1, tu + 16 - z1, tv + 16 - y1, col);
                 break;
         }
-        if (flipU) {
-            // TileRenderer::xFlipTexture: развёртка зеркально по u
-            for (int i = m.verts - 4; i < m.verts; i++) m.uv[i * 2] = (short) (2 * tu + 16 - m.uv[i * 2]);
-        }
+        m.flipTu = -1;
     }
 
     private boolean flipU;
@@ -886,7 +909,7 @@ public final class LevelRenderer {
         int tu = (t & 15) * 16, tv = (t >> 4) * 16;
         int h = 16;
         if (id == Tile.MELON_STEM) h = 2 * ((d & 7) + 1);
-        MeshBuilder m = cur;
+        SecBuf m = cur;
         int from = m.verts;
         // TileRenderer::tesselateCrossTexture: диагонали от 0.05 до 0.95 блока (в сетке 1/16 — 1..15), обе стороны
         int a = 1, b = 15;
@@ -906,7 +929,7 @@ public final class LevelRenderer {
         int col = color(light(x, y, z), 255, 0xFFFFFF, 255);
         int bx = (x - ox) * 16, by = (y - oy) * 16 - 1, bz = (z - oz) * 16;
         int tu = (t & 15) * 16, tv = (t >> 4) * 16;
-        MeshBuilder m = cur;
+        SecBuf m = cur;
         int from = m.verts;
         for (int k = 0; k < 2; k++) {
             int o = k == 0 ? 4 : 12;
@@ -935,7 +958,7 @@ public final class LevelRenderer {
         int y0 = by + lift, y1 = by + lift + 16;
         // верх смещён к центру блока
         int tx = sx * -3 / 8, tz = sz * -3 / 8;
-        MeshBuilder m = cur;
+        SecBuf m = cur;
         int from = m.verts;
         // 4 плоскости на ±1/16 от оси
         m.quad(cx - 8, y0, cz - 1, tu, tv + 16, col, cx + 8, y0, cz - 1, tu + 16, tv + 16, col,
@@ -985,7 +1008,7 @@ public final class LevelRenderer {
         int h11 = sameAbove ? 16 : cornerHeight(x + 1, y, z + 1, water);
         int bx = (x - ox) * 16, by = (y - oy) * 16, bz = (z - oz) * 16;
         int tu = (t & 15) * 16, tv = (t >> 4) * 16;
-        MeshBuilder m = cur;
+        SecBuf m = cur;
         int own = water ? light(x, y, z) : FULL;
         if (!sameAbove) {
             int col = color(water ? light(x, y + 1, z) : FULL, 255, 0xFFFFFF, alpha);

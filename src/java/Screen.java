@@ -247,6 +247,11 @@ public abstract class Screen {
     public void keyChar(int c) {
     }
 
+    /** Нажатие клавиши до разбора на навигацию (KeysScreen ждёт клавишу); true — съедено. */
+    public boolean keyRaw(int k, int ga) {
+        return false;
+    }
+
     /** Экран принимает текст с клавиатуры. */
     public boolean wantsText() {
         return false;

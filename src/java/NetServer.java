@@ -260,10 +260,14 @@ public final class NetServer {
     }
 
     /** RequestChunkPacket -> ChunkDataPacket: столбцы, отмеченные в updateMap, по 16 блоков + 8 байт data. */
+    private final byte[] chunkB = new byte[32768], chunkD = new byte[16384];
+
     private void onRequestChunk(Raknet.Conn c, int cx, int cz) {
         if (cx < 0 || cz < 0 || cx >= Level.CHUNKS || cz >= Level.CHUNKS) return;
         int ci = cx | (cz << 4);
-        byte[] blocks = level.blocks[ci], data = level.data[ci], um = level.updateMap[ci];
+        byte[] blocks = chunkB, data = chunkD, um = level.updateMap[ci];
+        level.blocks.exportChunk(ci, blocks, false);
+        level.data.exportChunk(ci, data, true);
         NetOut o = Net.out.reset();
         o.u8(Net.CHUNKDATA);
         o.i32(cx);

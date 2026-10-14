@@ -9,10 +9,8 @@ public final class Level {
     public static final int SEA_LEVEL = 64;
     public static final int TICKS_PER_DAY = 19200;
 
-    public final byte[][] blocks = new byte[CHUNKS * CHUNKS][];
-    public final byte[][] data = new byte[CHUNKS * CHUNKS][];
-    public final byte[][] sky = new byte[CHUNKS * CHUNKS][];
-    public final byte[][] blk = new byte[CHUNKS * CHUNKS][];
+    /** блоки, data, свет неба и блоков — сжатые слои (Pal), сырыми было бы 20 МБ */
+    public final Pal blocks = new Pal(8), data = new Pal(4), sky = new Pal(4), blk = new Pal(4);
     public final byte[][] updateMap = new byte[CHUNKS * CHUNKS][];
     public final boolean[] unsaved = new boolean[CHUNKS * CHUNKS];
     /** y первого блока над непрозрачной для света частью столбца */
@@ -50,10 +48,6 @@ public final class Level {
 
     public Level() {
         for (int i = 0; i < CHUNKS * CHUNKS; i++) {
-            blocks[i] = new byte[32768];
-            data[i] = new byte[16384];
-            sky[i] = new byte[16384];
-            blk[i] = new byte[16384];
             updateMap[i] = new byte[256];
         }
         randValue = random.nextInt();
@@ -65,30 +59,24 @@ public final class Level {
 
     public int getTile(int x, int y, int z) {
         if ((x & ~255) != 0 || (z & ~255) != 0 || (y & ~127) != 0) return 0;
-        return blocks[(x >> 4) | ((z >> 4) << 4)][((x & 15) << 11) | ((z & 15) << 7) | y] & 255;
+        return blocks.get((x >> 4) | ((z >> 4) << 4), ((x & 15) << 11) | ((z & 15) << 7) | y);
     }
 
     public int getData(int x, int y, int z) {
         if ((x & ~255) != 0 || (z & ~255) != 0 || (y & ~127) != 0) return 0;
-        int i = ((x & 15) << 11) | ((z & 15) << 7) | y;
-        int b = data[(x >> 4) | ((z >> 4) << 4)][i >> 1];
-        return (i & 1) == 0 ? b & 15 : (b >> 4) & 15;
+        return data.get((x >> 4) | ((z >> 4) << 4), ((x & 15) << 11) | ((z & 15) << 7) | y);
     }
 
     public int getSky(int x, int y, int z) {
         if ((x & ~255) != 0 || (z & ~255) != 0) return 15;
         if (y >= HEIGHT) return 15;
         if (y < 0) return 0;
-        int i = ((x & 15) << 11) | ((z & 15) << 7) | y;
-        int b = sky[(x >> 4) | ((z >> 4) << 4)][i >> 1];
-        return (i & 1) == 0 ? b & 15 : (b >> 4) & 15;
+        return sky.get((x >> 4) | ((z >> 4) << 4), ((x & 15) << 11) | ((z & 15) << 7) | y);
     }
 
     public int getBlockLight(int x, int y, int z) {
         if ((x & ~255) != 0 || (z & ~255) != 0 || (y & ~127) != 0) return 0;
-        int i = ((x & 15) << 11) | ((z & 15) << 7) | y;
-        int b = blk[(x >> 4) | ((z >> 4) << 4)][i >> 1];
-        return (i & 1) == 0 ? b & 15 : (b >> 4) & 15;
+        return blk.get((x >> 4) | ((z >> 4) << 4), ((x & 15) << 11) | ((z & 15) << 7) | y);
     }
 
     /** Итоговая яркость 0..15 с учётом времени суток. */
@@ -162,8 +150,8 @@ public final class Level {
         if (!inside(x, y, z)) return;
         int c = (x >> 4) | ((z >> 4) << 4);
         int i = ((x & 15) << 11) | ((z & 15) << 7) | y;
-        blocks[c][i] = (byte) id;
-        setNibble(data[c], i, d);
+        blocks.set(c, i, id);
+        data.set(c, i, d);
     }
 
     /** Level::noNeighborUpdate */
@@ -201,10 +189,10 @@ public final class Level {
     private boolean setRaw(int x, int y, int z, int id, int d) {
         int c = (x >> 4) | ((z >> 4) << 4);
         int i = ((x & 15) << 11) | ((z & 15) << 7) | y;
-        int old = blocks[c][i] & 255;
-        blocks[c][i] = (byte) id;
+        int old = blocks.get(c, i);
+        blocks.set(c, i, id);
         if (old != 0) TileLogic.onRemove(this, old, x, y, z);
-        setNibble(data[c], i, d);
+        data.set(c, i, d);
         unsaved[c] = true;
         updateMap[c][(x & 15) | ((z & 15) << 4)] |= (byte) (1 << (y >> 4));
         if (Tile.lightBlock[old] != Tile.lightBlock[id] || Tile.lightEmit[old] != Tile.lightEmit[id]) {
@@ -225,8 +213,8 @@ public final class Level {
         if (!inside(x, y, z)) return false;
         int c = (x >> 4) | ((z >> 4) << 4);
         int i = ((x & 15) << 11) | ((z & 15) << 7) | y;
-        if (getNibble(data[c], i) == d) return false;
-        setNibble(data[c], i, d);
+        if (data.get(c, i) == d) return false;
+        data.set(c, i, d);
         unsaved[c] = true;
         updateMap[c][(x & 15) | ((z & 15) << 4)] |= (byte) (1 << (y >> 4));
         if (renderer != null) renderer.tileChanged(x, y, z);
@@ -342,28 +330,29 @@ public final class Level {
 
     // ---- свет ----
 
-    private void setLight(byte[][] layer, int x, int y, int z, int v) {
-        int c = (x >> 4) | ((z >> 4) << 4);
-        setNibble(layer[c], ((x & 15) << 11) | ((z & 15) << 7) | y, v);
+    private static void setLight(Pal layer, int x, int y, int z, int v) {
+        layer.set((x >> 4) | ((z >> 4) << 4), ((x & 15) << 11) | ((z & 15) << 7) | y, v);
     }
 
-    private int getLight(byte[][] layer, int x, int y, int z) {
-        int c = (x >> 4) | ((z >> 4) << 4);
-        return getNibble(layer[c], ((x & 15) << 11) | ((z & 15) << 7) | y);
+    private static int getLight(Pal layer, int x, int y, int z) {
+        return layer.get((x >> 4) | ((z >> 4) << 4), ((x & 15) << 11) | ((z & 15) << 7) | y);
     }
 
     private int calcHeight(int x, int z) {
         int c = (x >> 4) | ((z >> 4) << 4);
         int base = ((x & 15) << 11) | ((z & 15) << 7);
-        byte[] b = blocks[c];
+        Pal b = blocks;
         int y = HEIGHT - 1;
-        while (y >= 0 && Tile.lightBlock[b[base | y] & 255] == 0) y--;
+        // пустые куски сверху пропускаются целиком
+        while (y >= 3 && b.uniform((c << 5) | (y >> 2)) && Tile.lightBlock[b.uniformValue((c << 5) | (y >> 2))] == 0) y -= 4;
+        while (y >= 0 && Tile.lightBlock[b.get(c, base | y)] == 0) y--;
         return y + 1;
     }
 
-    private int[] queue = new int[1 << 16];
+    // очереди растут по необходимости и сжимаются после полного пересчёта света
+    private int[] queue = new int[1 << 12];
     private int qHead, qTail;
-    private int[] remQ = new int[1 << 15];
+    private int[] remQ = new int[1 << 12];
     private int dMinX, dMinY, dMinZ, dMaxX, dMaxY, dMaxZ;
 
     private void push(int x, int y, int z, int lvl) {
@@ -387,7 +376,7 @@ public final class Level {
     private static final int[] DX = { 0, 0, 0, 0, -1, 1 }, DY = { -1, 1, 0, 0, 0, 0 }, DZ = { 0, 0, -1, 1, 0, 0 };
 
     /** Распространение из очереди (увеличение света). */
-    private void propagate(byte[][] layer, boolean track) {
+    private void propagate(Pal layer, boolean track) {
         while (qHead < qTail) {
             int p = queue[qHead++];
             int x = p & 255, z = (p >> 8) & 255, y = (p >> 16) & 127;
@@ -409,7 +398,7 @@ public final class Level {
     }
 
     /** Удаление света с позиций (снятие источников), затем досвет от границы. */
-    private void removeLight(byte[][] layer, boolean skyLayer, int[] pos, int count) {
+    private void removeLight(Pal layer, boolean skyLayer, int[] pos, int count) {
         int rh = 0, rt = 0;
         int[] rq = remQ;
         for (int k = 0; k < count; k++) {
@@ -514,18 +503,38 @@ public final class Level {
         propagate(blk, true);
     }
 
-    /** Полный расчёт карты высот и света (после генерации или загрузки старого мира). */
+    /**
+     * Полный расчёт карты высот и света (после генерации или загрузки старого мира). Куски целиком над рельефом
+     * чанка или целиком под ним заполняются одним значением, растекание идёт только от границ.
+     */
     public void recalcAllLight() {
-        for (int c = 0; c < CHUNKS * CHUNKS; c++) {
-            byte[] s = sky[c], b = blk[c];
-            for (int i = 0; i < 16384; i++) { s[i] = 0; b[i] = 0; }
-        }
         recalcHeightmap();
+        int[] vals = new int[Pal.CELLS];
+        for (int c = 0; c < CHUNKS * CHUNKS; c++) {
+            int cx = (c & 15) << 4, cz = (c >> 4) << 4, minH = 255, maxH = 0;
+            for (int x = 0; x < 16; x++)
+                for (int z = 0; z < 16; z++) {
+                    int h = height[(cx + x) | ((cz + z) << 8)] & 255;
+                    if (h < minH) minH = h;
+                    if (h > maxH) maxH = h;
+                }
+            for (int py = 0; py < Pal.NP; py++) {
+                int y0 = py << 2, k = (c << 5) | py;
+                if (y0 >= maxH) sky.fill(k, 15);
+                else if (y0 + 3 < minH) sky.fill(k, 0);
+                else {
+                    for (int cell = 0; cell < Pal.CELLS; cell++) {
+                        int x = cell >> 6, z = (cell >> 2) & 15, y = y0 | (cell & 3);
+                        vals[cell] = y >= (height[(cx + x) | ((cz + z) << 8)] & 255) ? 15 : 0;
+                    }
+                    sky.encode(k, vals);
+                }
+            }
+        }
         qHead = qTail = 0;
         for (int x = 0; x < SIZE; x++)
             for (int z = 0; z < SIZE; z++) {
                 int h = height[x | (z << 8)] & 255;
-                for (int y = HEIGHT - 1; y >= h; y--) setLight(sky, x, y, z, 15);
                 // источники для бокового растекания: ячейки над своей высотой, но ниже высоты соседей
                 int mh = h;
                 if (x > 0) mh = Math.max(mh, height[(x - 1) | (z << 8)] & 255);
@@ -537,19 +546,27 @@ public final class Level {
             }
         propagate(sky, false);
         qHead = qTail = 0;
+        blk.clear(0);
         for (int c = 0; c < CHUNKS * CHUNKS; c++) {
-            byte[] b = blocks[c];
             int cx = (c & 15) << 4, cz = (c >> 4) << 4;
-            for (int i = 0; i < 32768; i++) {
-                int em = Tile.lightEmit[b[i] & 255];
-                if (em > 0) {
-                    int x = cx + (i >> 11), z = cz + ((i >> 7) & 15), y = i & 127;
-                    setNibble(blk[c], i, em);
-                    push(x, y, z, 0);
+            for (int py = 0; py < Pal.NP; py++) {
+                int k = (c << 5) | py;
+                if (blocks.uniform(k) && Tile.lightEmit[blocks.uniformValue(k)] == 0) continue;
+                blocks.decode(k, vals);
+                for (int cell = 0; cell < Pal.CELLS; cell++) {
+                    int em = Tile.lightEmit[vals[cell]];
+                    if (em > 0) {
+                        int x = cx + (cell >> 6), z = cz + ((cell >> 2) & 15), y = (py << 2) | (cell & 3);
+                        setLight(blk, x, y, z, em);
+                        push(x, y, z, 0);
+                    }
                 }
             }
         }
         propagate(blk, false);
+        // большие очереди нужны только полному пересчёту
+        queue = new int[1 << 12];
+        remQ = new int[1 << 12];
     }
 
     public void recalcHeightmap() {
@@ -973,12 +990,11 @@ public final class Level {
             for (int cz = 0; cz < CHUNKS; cz++) {
                 int c = cx | (cz << 4);
                 if (!polled[c]) continue;
-                byte[] b = blocks[c];
                 for (int k = 0; k < 20; k++) {
                     randValue = randValue * 3 + 1013904223;
                     int val = randValue >> 2;
                     int x = val & 15, z = (val >> 8) & 15, y = (val >> 16) & 127;
-                    int id = b[(x << 11) | (z << 7) | y] & 255;
+                    int id = blocks.get(c, (x << 11) | (z << 7) | y);
                     if (TileLogic.ticking[id]) TileLogic.tick(this, id, cx * 16 + x, y, cz * 16 + z, random);
                 }
             }
