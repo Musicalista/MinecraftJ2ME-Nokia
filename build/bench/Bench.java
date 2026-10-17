@@ -18,6 +18,22 @@ public class Bench {
         return h;
     }
 
+    /** Hash of the non-block state, one value per component, to show which part diverges. */
+    static String parts(Level l) {
+        long ents = 1469598103934665603L;
+        for (int e = 0; e < l.entities.size(); e++) {
+            Entity en = (Entity) l.entities.elementAt(e);
+            ents = 31 * ents + en.getClass().getName().hashCode();
+            ents = 31 * ents + Float.floatToIntBits(en.x);
+            ents = 31 * ents + Float.floatToIntBits(en.y);
+            ents = 31 * ents + Float.floatToIntBits(en.z);
+            ents = 31 * ents + en.entityId;
+        }
+        Player p = l.player;
+        long pl = Float.floatToIntBits(p.x) * 31L + Float.floatToIntBits(p.y) * 17L + Float.floatToIntBits(p.z);
+        return "time=" + l.time + " n=" + l.entities.size() + " ents=" + Long.toHexString(ents) + " player=" + Long.toHexString(pl);
+    }
+
     public static void main(String[] args) {
         long seed = args.length > 0 ? Long.parseLong(args[0]) : 12345L;
         int ticks = args.length > 1 ? Integer.parseInt(args[1]) : 600;
@@ -57,6 +73,16 @@ public class Bench {
             throw new RuntimeException(e);
         }
 
+        // Level's random-tick generator starts from random.nextInt() in the constructor (unseeded).
+        // Fix it once, before the first tick (test-only, via reflection).
+        try {
+            java.lang.reflect.Field rv = Level.class.getDeclaredField("randValue");
+            rv.setAccessible(true);
+            rv.setInt(l, (int) seed);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
         t0 = System.currentTimeMillis();
         for (int i = 0; i < ticks; i++) {
             l.random.setSeed(seed * 31 + i);
@@ -77,7 +103,7 @@ public class Bench {
                 }
             }
             l.tick();
-            if (CHECKPOINT > 0 && (i + 1) >= Integer.getInteger("bench.cpFrom", 0) && (i + 1) % CHECKPOINT == 0) System.out.println("cp " + (i + 1) + " " + stateHash(l));
+            if (CHECKPOINT > 0 && (i + 1) >= Integer.getInteger("bench.cpFrom", 0) && (i + 1) % CHECKPOINT == 0) System.out.println("cp " + (i + 1) + " blocks=" + stateHash(l) + " " + parts(l));
         }
         long tickMs = System.currentTimeMillis() - t0;
 
