@@ -33,7 +33,7 @@ CP="$(w "$RT_CLASSES");$(w "$ROOT/build/compile-stubs")$LIBS"
 [ -f "$WORK/classes/MinecraftMIDlet.class" ] || { echo "javac failed"; exit 1; }
 
 # 2. resources + manifest (values from project.cfg)
-cp -r "$ROOT/res" "$WORK/classes/"
+cp -r "$ROOT/res/." "$WORK/classes/"   # resources live at the jar root (/gui/..., /snd/...)
 cat > "$WORK/manifest.mf" <<'EOF'
 Manifest-Version: 1.0
 MIDlet-Name: MinecraftJ2ME_PE_0.6.1
