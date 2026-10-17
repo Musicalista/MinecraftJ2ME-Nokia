@@ -32,6 +32,9 @@ CP="$(w "$MIDP_API")$LIBS"
     -cp "$CP" -d "$(w "$WORK/classes")" @"$(w "$WORK/sources.txt")" 2>&1 | grep -v "^Note:" ) || true
 [ -f "$WORK/classes/MinecraftMIDlet.class" ] || { echo "javac failed"; exit 1; }
 
+# compile-only API classes must not ship: drop them before packaging
+rm -rf "$WORK/classes/javax"
+
 # 2. resources at the jar root (the game loads /gui/..., /snd/...)
 cp -r "$ROOT/res/." "$WORK/classes/"
 
