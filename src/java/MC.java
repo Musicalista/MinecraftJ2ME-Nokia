@@ -199,7 +199,7 @@ public final class MC extends GameCanvas implements Runnable, CommandListener {
 
     // ---- пальцы (Multitouch.cpp): номер пальца -> точка и роль, назначенная по месту касания ----
 
-    static final int P_NONE = 0, P_SCREEN = 1, P_DPAD = 2, P_WORLD = 3, P_PAUSE = 4, MAX_PTR = 10;
+    static final int P_NONE = 0, P_SCREEN = 1, P_DPAD = 2, P_WORLD = 3, P_PAUSE = 4, P_JUMP = 5, MAX_PTR = 10;
     final int[] ptrId = new int[MAX_PTR], ptrX = new int[MAX_PTR], ptrY = new int[MAX_PTR], ptrRole = new int[MAX_PTR];
     final boolean[] ptrJust = new boolean[MAX_PTR];
     { for (int i = 0; i < MAX_PTR; i++) ptrId[i] = -1; }
@@ -1008,6 +1008,7 @@ public final class MC extends GameCanvas implements Runnable, CommandListener {
 
     private void gamePress(int k, int x, int y) {
         if (gui.pauseAt(x, y)) { ptrRole[k] = P_PAUSE; return; }
+        if (gui.jumpAt(x, y)) { ptrRole[k] = P_JUMP; return; }
         int hb = gui.slotAt(x, y);
         if (hb >= 0) {
             // Gui::handleClick: последний слот — выбор блоков
@@ -1091,7 +1092,7 @@ public final class MC extends GameCanvas implements Runnable, CommandListener {
         if (p.flying) keySneak = false;
         int nd = 0;
         for (int i = 0; i < MAX_PTR; i++) {
-            if (ptrId[i] >= 0 && ptrRole[i] == P_DPAD) {
+            if (ptrId[i] >= 0 && (ptrRole[i] == P_DPAD || ptrRole[i] == P_JUMP)) {
                 dpX[nd] = ptrX[i];
                 dpY[nd] = ptrY[i];
                 dpJust[nd++] = ptrJust[i];
