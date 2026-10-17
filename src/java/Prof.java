@@ -33,8 +33,9 @@ final class Prof {
     static int frames, ticks, rebuilds, combines, gcs, hitches, paths;
     static long frameMs, maxFrame, maxTick, lastFree, start;
 
+    /** Без mcj.debug таймеры не нужны: не вызываем currentTimeMillis в горячих путях (кадр, тик, жидкости). */
     static long t() {
-        return System.currentTimeMillis();
+        return on ? System.currentTimeMillis() : 0;
     }
 
     static void add(int k, long t0) {

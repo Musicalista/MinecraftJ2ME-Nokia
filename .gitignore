@@ -1,2 +1,5 @@
 build/work/
 dist/
+build/bench/out/
+build/bench/base/
+build/bench/res.txt
