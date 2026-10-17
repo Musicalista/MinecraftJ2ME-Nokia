@@ -7,6 +7,17 @@
  * usage: java -cp <classes>:<bench> Bench [seed] [ticks]
  */
 public class Bench {
+    /** print a state checkpoint every N ticks (0 = off), used to locate divergence between runs */
+    static final int CHECKPOINT = Integer.getInteger("bench.cp", 0);
+
+    static long stateHash(Level l) {
+        long h = 1125899906842597L;
+        for (int c = 0; c < 256; c++)
+            for (int i = 0; i < 16 * 16 * 128; i++) h = 31 * h + l.blocks.get(c, i);
+        for (int i = 0; i < l.height.length; i++) h = 31 * h + l.height[i];
+        return h;
+    }
+
     public static void main(String[] args) {
         long seed = args.length > 0 ? Long.parseLong(args[0]) : 12345L;
         int ticks = args.length > 1 ? Integer.parseInt(args[1]) : 600;
@@ -50,6 +61,11 @@ public class Bench {
         for (int i = 0; i < ticks; i++) {
             l.random.setSeed(seed * 31 + i);
             mthRnd.setSeed(seed * 17 + i);
+            try {
+                rndField.set(l.player, new java.util.Random(seed * 53 + i));
+            } catch (IllegalAccessException ex) {
+                throw new RuntimeException(ex);
+            }
             for (int e = 0; e < l.entities.size(); e++) {
                 Object o = l.entities.elementAt(e);
                 if (o instanceof Mob) {
@@ -61,13 +77,11 @@ public class Bench {
                 }
             }
             l.tick();
+            if (CHECKPOINT > 0 && (i + 1) >= Integer.getInteger("bench.cpFrom", 0) && (i + 1) % CHECKPOINT == 0) System.out.println("cp " + (i + 1) + " " + stateHash(l));
         }
         long tickMs = System.currentTimeMillis() - t0;
 
-        long h = 1125899906842597L;
-        for (int c = 0; c < 256; c++)
-            for (int i = 0; i < 16 * 16 * 128; i++) h = 31 * h + l.blocks.get(c, i);
-        for (int i = 0; i < l.height.length; i++) h = 31 * h + l.height[i];
+        long h = stateHash(l);
 
         System.out.println("gen_ms=" + genMs);
         System.out.println("tick_ms=" + tickMs + " ticks=" + ticks + " per_tick_us=" + (tickMs * 1000.0 / ticks));
