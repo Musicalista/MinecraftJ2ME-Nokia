@@ -22,6 +22,9 @@ public final class Gui {
     boolean forward, northJump, allowHeightChange, pressedJump, changingHeight, renderFlight;
     private int jumpTriggerTime;
     float pauseSize, pauseX, pauseY;
+    /** separate jump button (outside the d-pad), rectangle x0,y0,x1,y1; null until laid out */
+    private float[] jumpBtn;
+    private boolean jumpDown;
     /**
      * Custom: размер при ползунке 50% — от короткой стороны экрана, чтобы на сенсоре 3-3.5" было удобно:
      * кнопка крестовины 16% (~8 мм, как pref 0.15 в TouchscreenInput оригинала), пауза 11% (~7 мм).
@@ -88,6 +91,8 @@ public final class Gui {
         area[S] = rect(x0 + bw, y0 + 2 * bw);
         area[WEST] = rect(x0, y0 + bw);
         area[E] = rect(x0 + 2 * bw, y0 + bw);
+        float jx = Options.lefty ? 8 : w - 8 - bw;
+        jumpBtn = new float[] { jx, y0 + 2 * bw, jx + bw, y0 + 3 * bw };
         // кнопка паузы (как на iOS: 18 пикселей GUI, полупрозрачная)
         pauseSize = defaultPause(w, h) * Options.ctrlSize / 50f;
         if (Options.pauseX >= 0 && Options.pauseY >= 0) {
@@ -134,6 +139,11 @@ public final class Gui {
         return -1;
     }
 
+    /** the separate jump button under the touch point */
+    public boolean jumpAt(int x, int y) {
+        return mc.touchUI && jumpBtn != null && in(jumpBtn, x, y);
+    }
+
     public boolean inDpad(int x, int y) {
         if (!mc.touchUI) return false;
         return x >= baseX && y >= baseY && x < baseX + 3 * bw && y < baseY + 3 * bw;
@@ -178,9 +188,16 @@ public final class Gui {
         boolean jumping = false, heldJump = false, tmpForward = false, tmpNorthJump = false;
         for (int i = 0; i < 5; i++) down[i] = false;
         float bx0 = baseX, by0 = baseY, bx1 = baseX + 3 * bw, by1 = baseY + 3 * bw;
+        jumpDown = false;
         for (int i = 0; i < n; i++) {
             int x = xs[i], y = ys[i];
             boolean justPressed = just[i];
+            if (jumpBtn != null && in(jumpBtn, x, y)) {
+                jumpDown = true;
+                heldJump = true;
+                if (p.inWater || justPressed) jumping = true;
+                continue;
+            }
             if (x >= bx0 && y >= by0 && x < bx1 && y < by1 && forward && !changingHeight) {
                 float angle = Mth.PI + Mth.atan2(y - (by0 + by1) / 2, x - (bx0 + bx1) / 2);
                 ya = Mth.sin(angle);
@@ -412,6 +429,7 @@ public final class Gui {
         st = renderFlight && north ? DISCREET : (down[C] ? PRESSED : REL);
         if (renderFlight) tile(g, area[C], u + sz * 4, v + sz, st);
         else tile(g, area[C], u + sz * 4, v, st);
+        if (jumpBtn != null) tile(g, jumpBtn, u + sz * 4, v, jumpDown ? PRESSED : REL);
         // пауза (iOS-версия 0.6.1: на Android её заменяет кнопка «Назад»)
         int ps = (int) pauseSize;
         boolean pd = mc.pointerDown(MC.P_PAUSE);
