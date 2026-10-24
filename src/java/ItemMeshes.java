@@ -16,7 +16,7 @@ public final class ItemMeshes {
         public boolean terrain;
     }
 
-    private static final Hashtable blocks = new Hashtable(), flats = new Hashtable(), sprites = new Hashtable();
+    private static final IntMap blocks = new IntMap(), flats = new IntMap(), sprites = new IntMap();
     private static boolean meshFast = true;
 
     /** TileRenderer::canRender: блок рисуется объёмом, иначе — иконкой. */
@@ -52,7 +52,7 @@ public final class ItemMeshes {
             blocks.clear();
             meshFast = Tile.fastLeaves;
         }
-        Integer key = new Integer(id | (aux << 16));
+        int key = id | (aux << 16);
         Mesh m = (Mesh) blocks.get(key);
         if (m != null) return m;
         MeshBuilder b = new MeshBuilder();
@@ -146,7 +146,7 @@ public final class ItemMeshes {
     }
 
     public static Mesh flatIcon(int icon, boolean terrain) {
-        Integer key = new Integer(icon | (terrain ? 0x10000 : 0));
+        int key = icon | (terrain ? 0x10000 : 0);
         Mesh m = (Mesh) flats.get(key);
         if (m != null) return m;
         MeshBuilder b = new MeshBuilder();
@@ -176,7 +176,7 @@ public final class ItemMeshes {
     public static Mesh sprite(int id, int aux) {
         int icon = icon(id, aux);
         boolean terrain = id < 256;
-        Integer key = new Integer(icon | (terrain ? 0x10000 : 0));
+        int key = icon | (terrain ? 0x10000 : 0);
         Mesh m = (Mesh) sprites.get(key);
         if (m != null) return m;
         MeshBuilder b = new MeshBuilder();

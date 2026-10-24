@@ -63,7 +63,7 @@ public final class PathFinder {
     private static final int MAX_NODES = 2048;
 
     private final Level level;
-    private final Hashtable nodes = new Hashtable();
+    private final IntMap nodes = new IntMap(128);
     private Node[] heap = new Node[1024];
     private int heapSize;
     private final Node[] neighbors = new Node[4];
@@ -196,7 +196,7 @@ public final class PathFinder {
     }
 
     private Node node(int x, int y, int z) {
-        Integer key = new Integer(Node.createHash(x, y, z));
+        int key = Node.createHash(x, y, z);
         Node n = (Node) nodes.get(key);
         if (n == null) {
             n = new Node(x, y, z);

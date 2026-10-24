@@ -60,7 +60,8 @@ public final class Particles {
 
     /** Particle::Particle: случайный разлёт, размер, время жизни. */
     private int add(float px, float py, float pz, float xa, float ya, float za) {
-        if (count >= MAX) return -1;
+        int limit = Options.lowQuality ? 150 : MAX;
+        if (count >= limit) return -1;
         Player p = level.player;
         if (p != null) {
             float dx = p.x - px, dy = p.y + Player.EYE - py, dz = p.z - pz;
@@ -105,9 +106,10 @@ public final class Particles {
     /** ParticleEngine::destroy: 3x2x3 крошки. */
     public void destroy(int bx, int by, int bz, int id, int data) {
         if (id == 0) return;
-        for (int xx = 0; xx < 3; xx++)
-            for (int yy = 1; yy < 3; yy++)
-                for (int zz = 0; zz < 3; zz++) {
+        int step = Options.lowQuality ? 2 : 1;
+        for (int xx = 0; xx < 3; xx += step)
+            for (int yy = 1; yy < 3; yy += step)
+                for (int zz = 0; zz < 3; zz += step) {
                     float xp = bx + (xx + 0.5f) / 3, yp = by + (yy + 0.5f) / 3, zp = bz + (zz + 0.5f) / 3;
                     terrain(xp, yp, zp, 2 * (xp - bx - 0.5f), 2 * (yp - by - 0.5f), 2 * (zp - bz - 0.5f), id, data, bx, bz);
                 }

@@ -10,4 +10,4 @@ MIDlet-Description: Universal build: auto-adapts to keypad, touch, or hybrid on 
 Nokia-UI-Enhancement: EnableMultiPointTouchEvents
 MIDlet-Touch-Support: True
 MIDlet-Jar-URL: MinecraftJ2ME_Universal_Adaptive.jar
-MIDlet-Jar-Size: 1269653
+MIDlet-Jar-Size: 1269661

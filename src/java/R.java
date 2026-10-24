@@ -316,11 +316,11 @@ public final class R {
         return r;
     }
 
-    private static final Hashtable dirtCache = new Hashtable();
+    private static final IntMap dirtCache = new IntMap();
 
     /** Screen::renderDirtBackground: gui/background.png, плитка 32 пикселя GUI, затемнение shade (0x40 — меню). */
     public static void dirt(Graphics g, float x0, float y0, float x1, float y1, int shade, float uOff) {
-        Integer key = new Integer(shade);
+        int key = shade;
         Image tile = (Image) dirtCache.get(key);
         int T = b(32);
         if (tile == null) {
@@ -507,7 +507,7 @@ public final class R {
 
     // ---- предметы ----
 
-    private static final Hashtable iconCache = new Hashtable();
+    private static final IntMap iconCache = new IntMap();
     public static final int NORMAL = 0, DARK = 1, FADED = 2, GHOST = 3;
 
     /** ItemRenderer::renderGuiItem: иконка 16x16 пикселей GUI. */
@@ -517,7 +517,7 @@ public final class R {
 
     public static void item(Graphics g, int id, int aux, float x, float y, int mode) {
         if (id <= 0) return;
-        Integer key = new Integer(id | ((aux & 0xFFF) << 16) | (mode << 28));
+        int key = id | ((aux & 0xFFF) << 16) | (mode << 28);
         Image im = (Image) iconCache.get(key);
         if (im == null) {
             int N = b(16);
@@ -571,11 +571,11 @@ public final class R {
         shadow(g, countText(count), x, y, 0xCCCCCC, 2f / k);
     }
 
-    private static final Hashtable tileCache = new Hashtable();
+    private static final IntMap tileCache = new IntMap();
 
     /** пиксели тайла terrain.png (кэш нескольких последних) */
     private static int[] tile(int tex) {
-        Integer key = new Integer(tex);
+        int key = tex;
         int[] t = (int[]) tileCache.get(key);
         if (t == null) {
             t = terrain.region((tex & 15) * 16, (tex >> 4) * 16, 16, 16);

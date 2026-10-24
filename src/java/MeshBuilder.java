@@ -141,11 +141,10 @@ public final class MeshBuilder {
 
     private static int[] stripLens = new int[0];
     /** готовые TriangleStripArray по числу вершин: M3G-объекты не должны становиться мусором (см. DynMesh) */
-    private static final java.util.Hashtable stripCache = new java.util.Hashtable();
+    private static final IntMap stripCache = new IntMap();
 
     public static TriangleStripArray strips(int verts) {
-        Integer key = new Integer(verts);
-        TriangleStripArray t = (TriangleStripArray) stripCache.get(key);
+        TriangleStripArray t = (TriangleStripArray) stripCache.get(verts);
         if (t != null) return t;
         int quads = verts / 4;
         if (stripLens.length < quads) {
@@ -155,7 +154,7 @@ public final class MeshBuilder {
         int[] lens = new int[quads];
         System.arraycopy(stripLens, 0, lens, 0, quads);
         t = new TriangleStripArray(0, lens);
-        stripCache.put(key, t);
+        stripCache.put(verts, t);
         return t;
     }
 }

@@ -12,4 +12,4 @@ Nokia-MIDlet-Target-Display-Size: 320,240
 Nokia-UI-Enhancement: EnableMultiPointTouchEvents
 MIDlet-Touch-Support: True
 MIDlet-Jar-URL: MinecraftJ2ME_Landscape_320x240_QWERTY.jar
-MIDlet-Jar-Size: 1269709
+MIDlet-Jar-Size: 1269717
