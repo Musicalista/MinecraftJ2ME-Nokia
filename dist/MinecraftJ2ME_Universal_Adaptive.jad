@@ -1,0 +1,13 @@
+Manifest-Version: 1.0
+MIDlet-Name: Minecraft PE (Universal)
+MIDlet-Version: 0.6.1
+MIDlet-Vendor: XaViewStudios / Musicalista
+MIDlet-1: Minecraft PE, /icon.png, MinecraftMIDlet
+MicroEdition-Configuration: CLDC-1.1
+MicroEdition-Profile: MIDP-2.0
+MIDlet-Icon: /icon.png
+MIDlet-Description: Universal build: auto-adapts to keypad, touch, or hybrid on any screen resolution
+Nokia-UI-Enhancement: EnableMultiPointTouchEvents
+MIDlet-Touch-Support: True
+MIDlet-Jar-URL: MinecraftJ2ME_Universal_Adaptive.jar
+MIDlet-Jar-Size: 1269653

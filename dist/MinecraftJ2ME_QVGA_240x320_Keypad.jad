@@ -1,0 +1,15 @@
+Manifest-Version: 1.0
+MIDlet-Name: Minecraft PE (240x320 Keypad)
+MIDlet-Version: 0.6.1
+MIDlet-Vendor: XaViewStudios / Musicalista
+MIDlet-1: Minecraft PE, /icon.png, MinecraftMIDlet
+MicroEdition-Configuration: CLDC-1.1
+MicroEdition-Profile: MIDP-2.0
+MIDlet-Icon: /icon.png
+MIDlet-Description: Optimized for classic Nokia Series 40 / S60v3 240x320 portrait keypad phones
+Nokia-MIDlet-Original-Display-Size: 240,320
+Nokia-MIDlet-Target-Display-Size: 240,320
+Nokia-UI-Enhancement: EnableMultiPointTouchEvents
+MIDlet-Touch-Support: True
+MIDlet-Jar-URL: MinecraftJ2ME_QVGA_240x320_Keypad.jar
+MIDlet-Jar-Size: 1269694

@@ -41,7 +41,7 @@ public final class Level {
     public final java.util.Vector entities = new java.util.Vector();
     /** сущности неизвестных нам типов из entities.dat — пишутся обратно без изменений */
     public final java.util.Vector rawEntities = new java.util.Vector();
-    public final java.util.Hashtable tileEntities = new java.util.Hashtable();
+    public final IntMap tileEntities = new IntMap();
     public Player player;
     public final Random random = new Random();
     private int randValue;
@@ -688,15 +688,15 @@ public final class Level {
     }
 
     public TileEntity getTileEntity(int x, int y, int z) {
-        return (TileEntity) tileEntities.get(new Integer(x | (z << 8) | (y << 16)));
+        return (TileEntity) tileEntities.get(x | (z << 8) | (y << 16));
     }
 
     public void setTileEntity(TileEntity te) {
-        tileEntities.put(new Integer(te.x | (te.z << 8) | (te.y << 16)), te);
+        tileEntities.put(te.x | (te.z << 8) | (te.y << 16), te);
     }
 
     public void removeTileEntity(int x, int y, int z) {
-        tileEntities.remove(new Integer(x | (z << 8) | (y << 16)));
+        tileEntities.remove(x | (z << 8) | (y << 16));
     }
 
     public int countType(int typeId) {
@@ -723,7 +723,7 @@ public final class Level {
     public void explode(Entity source, float cx, float cy, float cz, float r) {
         int[] blow = new int[64];
         int nb = 0;
-        java.util.Hashtable seen = new java.util.Hashtable();
+        IntSet seen = new IntSet(64);
         for (int i = 0; i < 16; i++)
             for (int j = 0; j < 16; j++)
                 for (int k = 0; k < 16; k++) {
@@ -739,9 +739,8 @@ public final class Level {
                         if (t > 0) pow -= (Tile.explosionResistance(t) + 0.3f) * 0.3f;
                         if (pow > 0) {
                             // std::set<TilePos>: сравнение по hashCode
-                            Integer key = new Integer(bx * 8976890 + by * 981131 + bz);
-                            if (!seen.containsKey(key)) {
-                                seen.put(key, key);
+                            int key = bx * 8976890 + by * 981131 + bz;
+                            if (seen.add(key)) {
                                 if (nb * 3 + 3 > blow.length) {
                                     int[] n = new int[blow.length * 2];
                                     System.arraycopy(blow, 0, n, 0, nb * 3);

@@ -169,7 +169,9 @@ public final class MC extends GameCanvas implements Runnable, CommandListener {
                 y = ly;
             }
             // первое касание включает сенсорный режим до выхода из игры
-            if (t == 0 && !touchUI) touchUI = true;
+            if (Options.controlMode == 1) touchUI = true;
+            else if (Options.controlMode == 2) touchUI = false;
+            else if (t == 0 && !touchUI) touchUI = true;
             int k = ptrIndex(id, t == 0);
             if (k < 0) continue;
             if (t == 0) {
@@ -424,6 +426,8 @@ public final class MC extends GameCanvas implements Runnable, CommandListener {
             R.load();
             // настройки — до разметки интерфейса: от них зависят поворот, размер и место кнопок управления
             Options.load();
+            if (Options.controlMode == 1) touchUI = true;
+            else if (Options.controlMode == 2) touchUI = false;
             applyOrientation(devW, devH);
             R.setScale(guiScale(W, H), W, H);
             gui = new Gui(this);
@@ -491,9 +495,19 @@ public final class MC extends GameCanvas implements Runnable, CommandListener {
                     frames = 0;
                     fpsTime = now;
                 }
-                // без ограничения кадров: только уступить потоки ввода и звука; свёрнутая игра не крутит цикл впустую
-                if (isShown()) Thread.yield();
-                else Thread.sleep(50);
+                // Оптимизированный лимитер кадров и пейсинг: уступает потоки ввода/звука и предотвращает троттлинг CPU
+                if (isShown()) {
+                    long frameElapsed = t3 - t0;
+                    int targetMs = Options.fpsLimit == 0 ? 33 : (Options.fpsLimit == 1 ? 16 : 0);
+                    long sleepMs = targetMs - frameElapsed;
+                    if (sleepMs > 0) {
+                        Thread.sleep(sleepMs);
+                    } else {
+                        Thread.sleep(1);
+                    }
+                } else {
+                    Thread.sleep(50);
+                }
             } catch (Throwable t) {
                 Log.e("loop", t);
                 try { Thread.sleep(200); } catch (InterruptedException e) { }

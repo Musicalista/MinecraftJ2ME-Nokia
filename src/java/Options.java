@@ -21,6 +21,10 @@ public final class Options {
     /** поворот экрана: 0 — как у устройства, 1 — альбомный, 2 — портретный */
     public static int orientation;
     public static final String[] ORIENTATION_NAME = { "Auto", "Landscape", "Portrait" };
+    public static int controlMode; // 0=Auto (Hybrid), 1=Touchscreen, 2=Keypad Only
+    public static final String[] CONTROL_MODE_NAME = { "Auto (Hybrid)", "Touchscreen", "Keypad Only" };
+    public static int fpsLimit = 1; // 0=30 FPS, 1=60 FPS, 2=Uncapped
+    public static final String[] FPS_LIMIT_NAME = { "30 FPS (Battery)", "60 FPS (Smooth)", "Uncapped" };
     /** размер крестовины и кнопки паузы, % (50 — прежний размер) */
     public static int ctrlSize = 50;
     /** центры крестовины и паузы в тысячных долях экрана; -1 — место по умолчанию */
@@ -82,6 +86,8 @@ public final class Options {
             else if (k.equals("custom_autojump")) autoJump = b;
             else if (k.equals("custom_nametags")) nameTags = b;
             else if (k.equals("custom_orientation")) orientation = Mth.clamp(num(v, 0), 0, 2);
+            else if (k.equals("custom_controlmode")) controlMode = Mth.clamp(num(v, 0), 0, 2);
+            else if (k.equals("custom_fpslimit")) fpsLimit = Mth.clamp(num(v, 1), 0, 2);
             else if (k.equals("custom_ctrlsize")) ctrlSize = Mth.clamp(num(v, 50), CTRL_MIN, CTRL_MAX);
             else if (k.equals("custom_dpadx")) dpadX = Mth.clamp(num(v, -1), -1, 1000);
             else if (k.equals("custom_dpady")) dpadY = Mth.clamp(num(v, -1), -1, 1000);
@@ -121,6 +127,8 @@ public final class Options {
         sb.append("custom_autojump:").append(autoJump).append('\n');
         sb.append("custom_nametags:").append(nameTags).append('\n');
         sb.append("custom_orientation:").append(orientation).append('\n');
+        sb.append("custom_controlmode:").append(controlMode).append('\n');
+        sb.append("custom_fpslimit:").append(fpsLimit).append('\n');
         sb.append("custom_ctrlsize:").append(ctrlSize).append('\n');
         sb.append("custom_dpadx:").append(dpadX).append('\n');
         sb.append("custom_dpady:").append(dpadY).append('\n');

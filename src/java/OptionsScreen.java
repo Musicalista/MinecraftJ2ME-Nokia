@@ -31,6 +31,8 @@ public final class OptionsScreen extends Screen {
             { "o", "Screen orientation", "" },
             { "a", "Touch controls", "Position and size of the D-Pad and the pause button" },
             { "k", "Keys", "Reassign keypad and QWERTY keys" },
+            { "m", "Control mode", "" },
+            { "p", "FPS pacing / Limit", "" },
     };
     private Font fTitle = Font.getFont(Font.FACE_PROPORTIONAL, Font.STYLE_PLAIN, Font.SIZE_LARGE);
     private final Font fSum = Font.getFont(Font.FACE_PROPORTIONAL, Font.STYLE_PLAIN, Font.SIZE_SMALL);
@@ -112,6 +114,8 @@ public final class OptionsScreen extends Screen {
     private String summary(int i) {
         if (i == 1) return "'" + Options.username + "'";
         if (i == 18) return Options.ORIENTATION_NAME[Options.orientation];
+        if (ITEMS[i][0].equals("m")) return Options.CONTROL_MODE_NAME[Options.controlMode];
+        if (ITEMS[i][0].equals("p")) return Options.FPS_LIMIT_NAME[Options.fpsLimit];
         return ITEMS[i].length > 2 ? ITEMS[i][2] : "";
     }
 

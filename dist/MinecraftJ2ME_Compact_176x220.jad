@@ -1,0 +1,15 @@
+Manifest-Version: 1.0
+MIDlet-Name: Minecraft PE (176x220 Compact)
+MIDlet-Version: 0.6.1
+MIDlet-Vendor: XaViewStudios / Musicalista
+MIDlet-1: Minecraft PE, /icon.png, MinecraftMIDlet
+MicroEdition-Configuration: CLDC-1.1
+MicroEdition-Profile: MIDP-2.0
+MIDlet-Icon: /icon.png
+MIDlet-Description: Optimized for small screens (176x208 / 176x220, Nokia N70, 6600, K750i)
+Nokia-MIDlet-Original-Display-Size: 176,220
+Nokia-MIDlet-Target-Display-Size: 176,220
+Nokia-UI-Enhancement: EnableMultiPointTouchEvents
+MIDlet-Touch-Support: True
+MIDlet-Jar-URL: MinecraftJ2ME_Compact_176x220.jar
+MIDlet-Jar-Size: 1269694

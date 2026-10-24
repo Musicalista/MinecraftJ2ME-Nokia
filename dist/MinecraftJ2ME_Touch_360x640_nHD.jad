@@ -1,0 +1,15 @@
+Manifest-Version: 1.0
+MIDlet-Name: Minecraft PE (360x640 Touch)
+MIDlet-Version: 0.6.1
+MIDlet-Vendor: XaViewStudios / Musicalista
+MIDlet-1: Minecraft PE, /icon.png, MinecraftMIDlet
+MicroEdition-Configuration: CLDC-1.1
+MicroEdition-Profile: MIDP-2.0
+MIDlet-Icon: /icon.png
+MIDlet-Description: Optimized for Symbian^3, Belle, and S60v5 full touchscreen devices (Nokia 5800, N8)
+Nokia-MIDlet-Original-Display-Size: 360,640
+Nokia-MIDlet-Target-Display-Size: 360,640
+Nokia-UI-Enhancement: EnableMultiPointTouchEvents
+MIDlet-Touch-Support: True
+MIDlet-Jar-URL: MinecraftJ2ME_Touch_360x640_nHD.jar
+MIDlet-Jar-Size: 1269708
