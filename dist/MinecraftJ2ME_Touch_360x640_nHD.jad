@@ -12,4 +12,4 @@ Nokia-MIDlet-Target-Display-Size: 360,640
 Nokia-UI-Enhancement: EnableMultiPointTouchEvents
 MIDlet-Touch-Support: True
 MIDlet-Jar-URL: MinecraftJ2ME_Touch_360x640_nHD.jar
-MIDlet-Jar-Size: 1269716
+MIDlet-Jar-Size: 1269902

@@ -1,0 +1,15 @@
+Manifest-Version: 1.0
+MIDlet-Name: Minecraft PE (128x128 Square)
+MIDlet-Version: 0.6.1
+MIDlet-Vendor: XaViewStudios / Musicalista
+MIDlet-1: Minecraft PE, /icon.png, MinecraftMIDlet
+MicroEdition-Configuration: CLDC-1.1
+MicroEdition-Profile: MIDP-2.0
+MIDlet-Icon: /icon.png
+MIDlet-Description: Optimized for classic 128x128 square screens (Nokia 6100, 6610, 3100, 7250, C650)
+Nokia-MIDlet-Original-Display-Size: 128,128
+Nokia-MIDlet-Target-Display-Size: 128,128
+Nokia-UI-Enhancement: EnableMultiPointTouchEvents
+MIDlet-Touch-Support: True
+MIDlet-Jar-URL: MinecraftJ2ME_Square_128x128.jar
+MIDlet-Jar-Size: 1269895

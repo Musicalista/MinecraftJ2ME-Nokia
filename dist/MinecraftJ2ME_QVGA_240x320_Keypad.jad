@@ -12,4 +12,4 @@ Nokia-MIDlet-Target-Display-Size: 240,320
 Nokia-UI-Enhancement: EnableMultiPointTouchEvents
 MIDlet-Touch-Support: True
 MIDlet-Jar-URL: MinecraftJ2ME_QVGA_240x320_Keypad.jar
-MIDlet-Jar-Size: 1269702
+MIDlet-Jar-Size: 1269888

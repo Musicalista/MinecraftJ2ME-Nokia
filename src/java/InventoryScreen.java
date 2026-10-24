@@ -62,6 +62,7 @@ public final class InventoryScreen extends Screen implements InventoryPane.Callb
         else pane.setRect(realBx, top, realWidth, h);
         pane.fillMarginX = realBx;
         pane.renderCounts = !creative();
+        if (width < 140) bHeader.msg = "Inv"; else bHeader.msg = "Select blocks";
         bHeader.y = bDone.y = bCraft.y = bArmor.y = 0;
         bDone.x = width - bDone.width;
         bCraft.x = 0;

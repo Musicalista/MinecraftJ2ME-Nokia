@@ -5,9 +5,14 @@ Port e demake otimizado de **Minecraft: Pocket Edition 0.6.1** para **Java ME (J
 ---
 
 ## ⚡ Otimizações Implementadas
-- **Zero-GC Primitive Collections:** Estruturas de dados `IntMap` e `IntSet` com chave inteira primitiva (open-addressing) substituindo `Hashtable` e eliminando alocações de `new Integer()` no loop de renderização e consultas de Tile Entities.
-- **Frame Pacing & CPU Starvation Fix:** Substituição do loop descontrolado com `Thread.yield()` por um regulador adaptativo com temporização precisa de quadros e limites configuráveis (30 FPS para economia de bateria, 60 FPS ou Uncapped). Evita superaquecimento e elimina estalos no áudio e latência de entrada.
-- **Explosion Optimization:** Cálculo de propagação de explosões livre de alocações no heap.
+- **Zero-GC Primitive Collections:** Estruturas de dados `IntMap` e `IntSet` com chave inteira primitiva (open-addressing) substituindo `Hashtable` em:
+  - `Level.java`: consultas e modificações de TileEntities e cálculo de explosões.
+  - `PathFinder.java`: busca de caminho A* para IA de monstros e animais.
+  - `ItemMeshes.java`: malhas 3D de blocos e itens segurados na mão ou no chão.
+  - `MeshBuilder.java`: cache de faixas de triângulos (`stripCache`) M3G.
+  - `R.java`: caches de renderização de ícones (`iconCache`), texturas (`tileCache`) e menus (`dirtCache`).
+- **Frame Pacing & CPU Starvation Fix:** Regulador adaptativo com temporização precisa de quadros e limites configuráveis (30 FPS para economia de bateria, 60 FPS ou Uncapped). Evita superaquecimento e elimina estalos no áudio e latência de entrada.
+- **Throttling de Partículas em Low Quality:** Redução da geração de partículas ao minerar e limitação de teto máximo para dispositivos com CPU fraca.
 
 ---
 
@@ -21,10 +26,11 @@ Configurável em **Options > Custom > Control mode**:
 
 ## 📱 Builds e Telas Disponíveis (`dist/`)
 - `MinecraftJ2ME_Universal_Adaptive.jar`: Build universal responsiva para qualquer resolução.
+- `MinecraftJ2ME_Square_128x128.jar`: **Nova build compacta** para telas quadradas 128x128 (Nokia 6100, 6610, 3100, 7250, Motorola C650).
+- `MinecraftJ2ME_Compact_176x220.jar`: Otimizada para celulares de tela pequena (176x208 / 176x220).
 - `MinecraftJ2ME_QVGA_240x320_Keypad.jar`: Otimizada para celulares verticais 240x320 (Nokia S40 / S60v3).
 - `MinecraftJ2ME_Landscape_320x240_QWERTY.jar`: Otimizada para celulares horizontais 320x240 (Nokia E71, E72, C3).
 - `MinecraftJ2ME_Touch_360x640_nHD.jar`: Otimizada para celulares touch 360x640 (Symbian^3, S60v5, Nokia 5800, N8).
-- `MinecraftJ2ME_Compact_176x220.jar`: Otimizada para celulares de tela pequena (176x208 / 176x220).
 
 ---
 

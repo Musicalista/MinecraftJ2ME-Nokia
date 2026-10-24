@@ -53,7 +53,7 @@ public final class Gui {
         int maxDim = Math.max(w, h), minDim = Math.min(w, h);
         float pref = Math.min(maxDim * 0.11f, minDim * 0.45f / 3f);
         // крестовина сбоку от хотбара, если помещается; иначе (узкий экран) — над хотбаром
-        int n = 6;
+        int n = w < 160 ? 4 : (w < 200 ? 5 : 6);
         float side = (w - (20 * n + 2) * k) / 2f - 8 - 2 * k;
         boolean beside = side / 3f >= pref * 0.7f;
         bw = beside ? Math.min(pref, side / 3f) : pref;
@@ -341,14 +341,16 @@ public final class Gui {
         int h = p.health, oh = p.lastHealth;
         rnd.setSeed(tickCount * 312871L);
         int armor = p.armorValue();
+        int baseYo = 2 + hudTop();
         for (int i = 0; i < 10; i++) {
-            int yo = 2 + hudTop();
+            int yo = baseYo;
             int ip2 = i + i + 1;
             if (armor > 0) {
-                int xo = 2 + 80 + i * 8 + 4;
-                if (ip2 < armor) R.blit(g, R.icons, xo, yo, 16 + 2 * 9, 9, 9, 9);
-                else if (ip2 == armor) R.blit(g, R.icons, xo, yo, 16 + 4 * 9, 9, 9, 9);
-                else R.blit(g, R.icons, xo, yo, 16, 9, 9, 9);
+                int xoArmor = R.gw < 180 ? 2 + i * 8 : (2 + 80 + i * 8 + 4);
+                int yoArmor = R.gw < 180 ? baseYo + 10 : baseYo;
+                if (ip2 < armor) R.blit(g, R.icons, xoArmor, yoArmor, 16 + 2 * 9, 9, 9, 9);
+                else if (ip2 == armor) R.blit(g, R.icons, xoArmor, yoArmor, 16 + 4 * 9, 9, 9, 9);
+                else R.blit(g, R.icons, xoArmor, yoArmor, 16, 9, 9, 9);
             }
             int xo = 2 + i * 8;
             if (h <= 4) yo += rnd.nextInt(2) - 1;
@@ -370,7 +372,8 @@ public final class Gui {
     private void renderBubbles(Graphics g, Player p) {
         if (!p.isUnderWater()) return;
         int count = (int) Math.ceil((p.air - 2) * 10.0 / 300), extra = (int) Math.ceil(p.air * 10.0 / 300) - count;
-        for (int i = 0; i < count + extra; i++) R.blit(g, R.icons, i * 8 + 2, 12 + hudTop(), i < count ? 16 : 25, 18, 9, 9);
+        int yb = 12 + hudTop() + (p.armorValue() > 0 && R.gw < 180 ? 10 : 0);
+        for (int i = 0; i < count + extra; i++) R.blit(g, R.icons, i * 8 + 2, yb, i < count ? 16 : 25, 18, 9, 9);
     }
 
     /** Gui::renderChatMessages: снизу слева, гаснут через 10 секунд. */

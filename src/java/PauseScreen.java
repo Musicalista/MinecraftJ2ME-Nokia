@@ -38,14 +38,16 @@ public final class PauseScreen extends Screen {
     }
 
     protected void setupPositions() {
-        int yBase = 16;
-        bContinue.width = bQuit.width = bServerVisibility.width = bQuitAndSaveLocally.width = 160;
-        bContinue.x = bQuit.x = bServerVisibility.x = bQuitAndSaveLocally.x = (width - 160) / 2;
-        bQuitAndSaveLocally.y = yBase + 32 * 3;
-        bContinue.y = yBase + 32;
-        bQuit.y = yBase + 32 * 2;
-        bServerVisibility.y = yBase + 32 * 3;
-        bBluetooth.width = 160;
+        int btnW = Math.min(160, width - 16);
+        bContinue.width = bQuit.width = bServerVisibility.width = bQuitAndSaveLocally.width = btnW;
+        bContinue.x = bQuit.x = bServerVisibility.x = bQuitAndSaveLocally.x = (width - btnW) / 2;
+        int yBase = height < 140 ? 4 : 16;
+        int step = height < 140 ? 24 : 32;
+        bContinue.y = yBase + step;
+        bQuit.y = yBase + step * 2;
+        bServerVisibility.y = yBase + step * 3;
+        bQuitAndSaveLocally.y = yBase + step * 3;
+        bBluetooth.width = btnW;
         bBluetooth.x = bServerVisibility.x;
         noteY = -1;
         if (!Net.isHost()) return;
